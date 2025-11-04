@@ -874,7 +874,7 @@ Processing status: Ready for OCR analysis`;
           stdio: ['pipe', 'pipe', 'pipe'],
         });
 
-        console.log('python :::', python);
+        // console.log('python :::', python);
 
         let stdout = '';
         let stderr = '';

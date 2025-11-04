@@ -67,10 +67,17 @@ router.post('/analyze/:userId', async (req: Request, res: Response) => {
         const emails = emailsResult.emails;
 
         console.log(`📧 Fetched ${emails.length} emails from Gmail`);
+        const financialEmailIds = await aiService.classifyEmailSubjects(emails);
+        console.log(`${financialEmailIds.length} Financial email found`)
+
+        const filteredEmails = emails.filter(email => financialEmailIds.includes(email.id));
+        // console.log("filteredEmails :: ",filteredEmails,)
+
+
 
         const results = [];
 
-        for (const email of emails) {
+        for (const email of filteredEmails) {
             try {
                 const lockedAttachmentsPassword = await aiService.guessPassword(
                     email.subject,
@@ -240,29 +247,32 @@ router.get(
     }
 );
 
-router.get(
-    '/get-assets/',
-    authenticateJWT,
-    async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
-        try {
-            // console.log(req.user)
 
-            const assests = await financialDataService.getAssetsByUserId(req.user?.userId!)
-            return res.status(200).json({ success: true, data: assests });
 
-        } catch (error) {
-            console.error('Error fetching assets:', error);
-            return res.status(500).json({
-                success: false,
-                message: 'Failed to fetch assets',
-                error:
-                    error instanceof Error
-                        ? error.message
-                        : 'Unknown error',
-            });
-        }
-    }
-)
+// moved to vault.routes.ts
+// router.get(
+//     '/get-assets/',
+//     authenticateJWT,
+//     async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+//         try {
+//             // console.log(req.user)
+
+//             const assests = await financialDataService.getAssetsByUserId(req.user?.userId!)
+//             return res.status(200).json({ success: true, data: assests });
+
+//         } catch (error) {
+//             console.error('Error fetching assets:', error);
+//             return res.status(500).json({
+//                 success: false,
+//                 message: 'Failed to fetch assets',
+//                 error:
+//                     error instanceof Error
+//                         ? error.message
+//                         : 'Unknown error',
+//             });
+//         }
+//     }
+// )
 
 /**
  * GET /api/email-processing/search/:userId

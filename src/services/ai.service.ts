@@ -1,5 +1,6 @@
 import { prisma } from "@/config/database";
-import { AttachmentContent } from "./financial-data.service";
+import { AttachmentContent, EmailData } from "./financial-data.service";
+import { EmailMessage } from "@/types/google";
 
 interface FinancialAnalysisRequest {
   emailContent: string;
@@ -19,35 +20,35 @@ interface EnhancedFinancialData {
   date: string;
   accountNumber: string | null;
   confidence: number;
-  
+
   // Asset Classification (3 main categories)
   assetCategory: 'asset' | 'liability' | 'insurance';
   assetType: string;
   assetSubType: string | null;
-  
+
   // Status tracking
   status: 'active' | 'inactive' | 'pending' | 'complete' | 'missing';
-  
+
   // Bank details
   bankName?: string;
   ifscCode?: string;
   branchName?: string;
-  
+
   // Insurance/Investment specific
   policyNumber?: string;
   folioNumber?: string;
   fundName?: string;
-  
+
   // Financial metadata
   financialMetadata: {
     totalValue?: number;
     currentValue?: number;
-    
+
     // For recurring payments
     isRecurring: boolean;
     frequency?: 'monthly' | 'quarterly' | 'yearly' | 'one-time';
     dueDate?: string;
-    
+
     // Insurance specific
     coverageAmount?: number;
     premium?: number;
@@ -56,7 +57,7 @@ interface EnhancedFinancialData {
     sumAssured?: number;
     policyTerm?: number;
     beneficiary?: string;
-    
+
     // Liability specific
     outstandingBalance?: number;
     minimumPayment?: number;
@@ -64,7 +65,7 @@ interface EnhancedFinancialData {
     interestRate?: number;
     emiAmount?: number;
     emiDueDate?: string;
-    
+
     // Asset specific (Investments)
     purchasePrice?: number;
     currentNav?: number;
@@ -72,7 +73,7 @@ interface EnhancedFinancialData {
     appreciationRate?: number;
     returnsPercentage?: number;
   };
-  
+
   keyPoints: string[];
 }
 
@@ -102,7 +103,7 @@ export class AIService {
 
   constructor(openaiKey?: string) {
     this.openaiKey = openaiKey || process.env.OPENAI_API_KEY || '';
-    
+
     if (!this.openaiKey) {
       console.warn('⚠️ OpenAI API key not configured');
     } else {
@@ -111,23 +112,345 @@ export class AIService {
   }
 
   /**
+ * Classify email subjects and return only financial email IDs
+ * Single AI call for batch classification - reduces token usage
+ * 
+ * @param emailDataArray - Array of email data
+ * @returns Array of financial email IDs
+ */
+  /**
+  * Classify email subjects and return only MAJOR financial email IDs
+  * Filters out:
+  * - Marketing/promotional emails (plan purchases, platform offers)
+  * - Small casual transactions (UPI, small transfers)
+  * - Non-critical financial data
+  * 
+  * Keeps only:
+  * - Bank statements, account summaries
+  * - Assets (investments, real estate, business)
+  * - Liabilities (loans, credit cards, EMI)
+  * - Insurance (policies, premiums)
+  * - Mutual funds, stocks, investments
+  * - Major transactions
+  */
+  async classifyEmailSubjects(
+    emailDataArray: EmailMessage[]
+  ): Promise<string[]> {
+    try {
+      const subjects = emailDataArray
+        .map((email, index) => `${index}. ${email.subject}`)
+        .join('\n');
+
+      const prompt = `Analyze these email subjects and identify which ones contain MAJOR FINANCIAL data that needs tracking.
+
+INCLUDE:
+- Bank statements, account summaries, account confirmations
+- Investment statements (mutual funds, stocks, ETF, SIP, NPS)
+- Insurance policies, premiums, maturity notifications
+- Loan documents, loan statements, EMI reminders (not payment confirmations)
+- Asset acquisition/sale documents (real estate, property, business)
+- Tax documents (ITR, tax return, 1099, Form 16, TDS)
+- Liabilities (credit card statements, outstanding balances)
+- Income documents (salary slips, bonus, commission)
+- Loan applications, approvals, sanctions letters
+
+EXCLUDE:
+- Marketing emails (Vercel, AWS, cloud platforms offering plans/discounts)
+- Plan purchase offers or promotional campaigns
+- Small casual transactions (UPI payments, app transfers, wallet recharges)
+- Shopping receipts for small purchases
+- Email receipts for digital services
+- Confirmation emails for subscription plan changes
+- Notification emails (password reset, login alerts)
+- Food delivery, ride sharing, casual purchases
+- Entertainment, streaming, utilities bills (unless it's major liability tracking)
+
+Email Subjects:
+${subjects}
+
+Return ONLY a JSON array with JUST the indices of MAJOR financial emails:
+["0", "2", "5"]
+
+Only return indices of emails with MAJOR financial data. Return empty array [] if none qualify.`;
+
+      const response = await this.callOpenAI(prompt);
+      const jsonMatch = response.match(/\[[\s\S]*?\]/);
+
+      if (!jsonMatch) {
+        console.log('⚠️ Could not parse classification response');
+        return [];
+      }
+
+      const financialIndices: string[] = JSON.parse(jsonMatch[0]);
+
+      // Convert indices to email IDs
+      const financialEmailIds = financialIndices
+        .map(index => {
+          const idx = parseInt(index);
+          return emailDataArray[idx]?.id;
+        })
+        .filter((id): id is string => id !== undefined);
+
+      console.log(
+        `✅ Found ${financialEmailIds.length} major financial emails out of ${emailDataArray.length}`
+      );
+
+      if (financialEmailIds.length < emailDataArray.length) {
+        console.log(
+          `⏭️  Filtered out ${emailDataArray.length - financialEmailIds.length} non-critical emails`
+        );
+      }
+
+      return financialEmailIds;
+    } catch (error) {
+      console.error('❌ Error classifying email subjects:', error);
+      return [];
+    }
+  }
+
+  /**
+ * Enhanced local filtering for marketing and non-financial emails
+ */
+private isMarketingOrCasualEmail(emailData: EmailMessage): boolean {
+  const subject = (emailData.subject || '').toLowerCase();
+  const body = (emailData.preview || '').toLowerCase();
+  const sender = (emailData.from || '').toLowerCase();
+
+  // === MARKETING/PLATFORM EMAILS ===
+  const marketingPatterns = [
+    // Cloud platforms & deployment services
+    'vercel', 'render', 'fylo', 'aws', 'azure', 'heroku', 'railway',
+    'netlify', 'firebase', 'digital ocean', 'linode', 'vultr',
+    
+    // Payment & financial services platforms (not bank/actual financial)
+    'stripe', 'razorpay', 'paypal billing', 'square',
+    'twilio', 'sendgrid', 'mailgun',
+    
+    // SaaS & subscription services
+    'upgrade to', 'plan', 'pricing', 'discount', 'offer', 'promotion',
+    'limited offer', 'save now', 'get started', 'try for free',
+    'special deal', 'exclusive offer', 'claim your',
+    'activate', 'welcome to', 'get up and running',
+    '30 days free', 'free trial', 'standard support',
+    
+    // Generic marketing
+    'activate', 'welcome aboard', 'help you get started',
+    'scaling', 'cloud platform', 'deploy faster'
+  ];
+
+  // === SMALL/CASUAL TRANSACTIONS ===
+  const casualTransactionPatterns = [
+    // Digital wallets & casual payments
+    'upi', 'wallet', 'recharge', 'paytm', 'gpay', 'phonepay',
+    'small transfer', 'money transfer', 'quick payment',
+    'app recharge', 'subscription charged',
+    'amazon pay', 'airtel payments',
+    
+    // Food & delivery
+    'food delivery', 'uber eats', 'zomato', 'swiggy',
+    'doordash', 'grubhub', 'order delivered',
+    
+    // Ride sharing & casual services
+    'uber', 'ola', 'lyft', 'taxi',
+    
+    // Entertainment & casual
+    'streaming', 'netflix', 'spotify', 'youtube',
+    'movie ticket', 'bookMyShow',
+    
+    // Small shopping
+    'order confirmed', 'shipment', 'delivery', 'tracking',
+    'amazon', 'flipkart', 'ebay'
+  ];
+
+  // Check marketing patterns
+  for (const pattern of marketingPatterns) {
+    if (subject.includes(pattern) || body.includes(pattern)) {
+      console.log(`🔥 Filtered (Marketing): ${subject}`);
+      return true;
+    }
+  }
+
+  // Check casual transaction patterns
+  for (const pattern of casualTransactionPatterns) {
+    if (subject.includes(pattern) || body.includes(pattern)) {
+      console.log(`💳 Filtered (Casual): ${subject}`);
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Check if email is MAJOR financial only
+ */
+private isMajorFinancialEmail(emailData: EmailMessage): boolean {
+  const subject = (emailData.subject || '').toLowerCase();
+  const body = (emailData.preview || '').toLowerCase();
+
+  // === MAJOR FINANCIAL ONLY ===
+  const majorFinancialPatterns = [
+    // Bank statements
+    'statement', 'account summary', 'bank account',
+    
+    // Credit cards (actual statements, not small purchases)
+    'credit card statement', 'card statement', 'cc statement',
+    'outstanding balance', 'credit limit',
+    
+    // Loans
+    'loan statement', 'loan emi', 'home loan', 'car loan',
+    'personal loan', 'education loan', 'business loan',
+    'emi due', 'loan disbursement', 'loan approval',
+    
+    // Insurance
+    'policy statement', 'insurance premium', 'policy renewal',
+    'life insurance', 'health insurance', 'insurance claim',
+    'coverage', 'sum assured', 'maturity',
+    
+    // Investments & mutual funds
+    'mutual fund', 'mf statement', 'portfolio statement',
+    'investment statement', 'stock statement',
+    'sip', 'nps statement', 'ppf',
+    'dividend', 'dividend reinvestment',
+    
+    // Income & tax
+    'salary slip', 'payslip', 'income certificate',
+    'tax return', 'form 16', 'itr', '1099', 'w2',
+    'tds', 'tax', 'income tax',
+    
+    // Major transactions & assets
+    'property purchase', 'real estate', 'deed',
+    'business registration', 'company formation',
+    'cryptocurrency', 'digital asset',
+    
+    // Financial statements
+    'balance sheet', 'p&l', 'profit loss',
+    'financial statement', 'annual report',
+    
+    // Bank notifications (critical only)
+    'fund transfer', 'large withdrawal', 'account alert',
+    'suspicious activity', 'security alert'
+  ];
+
+  for (const pattern of majorFinancialPatterns) {
+    if (subject.includes(pattern) || body.includes(pattern)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Classify with multiple layers of filtering
+ */
+async classifyEmailSubjectsWithFiltering(
+  emailDataArray: EmailMessage[]
+): Promise<string[]> {
+  try {
+    console.log(`🔍 Starting classification for ${emailDataArray.length} emails...\n`);
+
+    // Step 1: Local pre-filtering (remove obvious marketing/casual)
+    const afterLocalFilter = emailDataArray.filter(email => {
+      const isMarketing = this.isMarketingOrCasualEmail(email);
+      if (isMarketing) {
+        console.log(`  ❌ Filtered (${email.from}): "${email.subject}"`);
+      }
+      return !isMarketing;
+    });
+
+    console.log(
+      `\n📊 After local filter: ${emailDataArray.length} → ${afterLocalFilter.length}\n`
+    );
+
+    if (afterLocalFilter.length === 0) {
+      console.log('⚠️ All emails filtered as marketing/casual');
+      return [];
+    }
+
+    // Step 2: Check if remaining emails are major financial
+    const majorFinancialEmails = afterLocalFilter.filter(email => {
+      const isMajor = this.isMajorFinancialEmail(email);
+      if (isMajor) {
+        console.log(`  ✅ Major Financial: "${email.subject}"`);
+      }
+      return isMajor;
+    });
+
+    console.log(
+      `\n💰 Major financial emails: ${majorFinancialEmails.length}\n`
+    );
+
+    if (majorFinancialEmails.length === 0) {
+      console.log('⚠️ No major financial emails found');
+      return [];
+    }
+
+    // Step 3: AI classification for final confirmation (optional, for edge cases)
+    const aiConfirmed = await this.classifyEmailSubjects(majorFinancialEmails);
+
+    console.log(
+      `✅ Final after AI filtering: ${aiConfirmed.length} emails\n`
+    );
+
+    return aiConfirmed;
+  } catch (error) {
+    console.error('❌ Error in filtered classification:', error);
+    return [];
+  }
+}
+
+  /**
+   * Safe wrapper for classification with local filtering
+   */
+  // async classifyEmailSubjectsWithFiltering(
+  //   emailDataArray: EmailMessage[]
+  // ): Promise<string[]> {
+  //   try {
+  //     // Step 1: Local filtering to remove obvious marketing/casual emails
+  //     const filteredEmails = emailDataArray.filter(
+  //       email => !this.isMarketingOrCasualEmail(email)
+  //     );
+
+  //     if (filteredEmails.length === 0) {
+  //       console.log('⚠️ All emails filtered as marketing/casual');
+  //       return [];
+  //     }
+
+  //     console.log(
+  //       `📊 Local filtering: ${emailDataArray.length} → ${filteredEmails.length}`
+  //     );
+
+  //     // Step 2: AI classification for remaining emails
+  //     const aiFiltered = await this.classifyEmailSubjects(filteredEmails);
+
+  //     return aiFiltered;
+  //   } catch (error) {
+  //     console.error('❌ Error in filtered classification:', error);
+  //     return [];
+  //   }
+  // }
+
+
+
+  /**
    * Analyze financial email and extract transaction data
    */
   async analyzeFinancialEmail(
-  data: FinancialAnalysisRequest
-): Promise<AnalysisResult> {
-  try {
-    const prompt = `You are an expert financial document analyzer. Analyze this email and extract all financial information with proper categorization.
+    data: FinancialAnalysisRequest
+  ): Promise<AnalysisResult> {
+    try {
+      const prompt = `You are an expert financial document analyzer. Analyze this email and extract all financial information with proper categorization.
 
 Subject: ${data.subject}
 From: ${data.sender}
 Content: ${data.emailContent}
 Attachments: ${data.attachmentContents
-      ?.map(
-        (att) =>
-          `${att.filename} (${att.mimeType}, ${att.size} bytes, content: ${att.content.substring(0, 1000)}...)`
-      )
-      .join(', ') || 'None'}
+          ?.map(
+            (att) =>
+              `${att.filename} (${att.mimeType}, ${att.size} bytes, content: ${att.content.substring(0, 1000)}...)`
+          )
+          .join(', ') || 'None'}
 
 CLASSIFICATION RULES:
 
@@ -369,111 +692,111 @@ Example 4 - Home Loan EMI:
 
 Now analyze the provided email and return structured JSON:`;
 
-    const response = await this.callOpenAI(prompt);
-    const jsonMatch = response.match(/\{[\s\S]*\}/);
+      const response = await this.callOpenAI(prompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
 
-    if (!jsonMatch) {
-      console.log('No JSON found, using fallback analysis');
+      if (!jsonMatch) {
+        console.log('No JSON found, using fallback analysis');
+        return this.fallbackFinancialAnalysis(data);
+      }
+
+      // Parse attachment analysis separately
+      let attachmentAnalyses: any[] = [];
+      if (data.attachmentContents && data.attachmentContents.length > 0) {
+        for (const att of data.attachmentContents) {
+          const attAnalysis = await this.analyzePDFDocument({
+            text: att.content,
+            documentType: data.documentType || 'financial',
+          });
+          attachmentAnalyses.push(attAnalysis);
+        }
+      }
+
+      const extracted: EnhancedFinancialData = JSON.parse(jsonMatch[0]);
+
+      return {
+        success: true,
+        extractedData: {
+          // Basic transaction data
+          transactionType: extracted.transactionType || 'other',
+          amount: extracted.amount,
+          currency: extracted.currency || 'INR',
+          merchant: extracted.merchant,
+          description: extracted.description,
+          date: extracted.date,
+          accountNumber: extracted.accountNumber,
+          confidence: extracted.confidence || 50,
+
+          // Enhanced classification
+          assetCategory: extracted.assetCategory,
+          assetType: extracted.assetType,
+          assetSubType: extracted.assetSubType,
+          status: extracted.status || 'active',
+
+          // Bank details
+          bankName: extracted.bankName,
+          ifscCode: extracted.ifscCode,
+          branchName: extracted.branchName,
+
+          // Insurance/Investment specific
+          policyNumber: extracted.policyNumber,
+          folioNumber: extracted.folioNumber,
+          fundName: extracted.fundName,
+
+          // Complete metadata
+          financialMetadata: extracted.financialMetadata || {},
+        },
+        keyPoints: extracted.keyPoints || [],
+        summary: this.generateSmartSummary(extracted),
+        attachmentAnalyses,
+      };
+    } catch (error) {
+      console.error('Error analyzing financial email:', error);
       return this.fallbackFinancialAnalysis(data);
     }
-
-    // Parse attachment analysis separately
-    let attachmentAnalyses: any[] = [];
-    if (data.attachmentContents && data.attachmentContents.length > 0) {
-      for (const att of data.attachmentContents) {
-        const attAnalysis = await this.analyzePDFDocument({
-          text: att.content,
-          documentType: data.documentType || 'financial',
-        });
-        attachmentAnalyses.push(attAnalysis);
-      }
-    }
-
-    const extracted: EnhancedFinancialData = JSON.parse(jsonMatch[0]);
-
-    return {
-      success: true,
-      extractedData: {
-        // Basic transaction data
-        transactionType: extracted.transactionType || 'other',
-        amount: extracted.amount,
-        currency: extracted.currency || 'INR',
-        merchant: extracted.merchant,
-        description: extracted.description,
-        date: extracted.date,
-        accountNumber: extracted.accountNumber,
-        confidence: extracted.confidence || 50,
-        
-        // Enhanced classification
-        assetCategory: extracted.assetCategory,
-        assetType: extracted.assetType,
-        assetSubType: extracted.assetSubType,
-        status: extracted.status || 'active',
-        
-        // Bank details
-        bankName: extracted.bankName,
-        ifscCode: extracted.ifscCode,
-        branchName: extracted.branchName,
-        
-        // Insurance/Investment specific
-        policyNumber: extracted.policyNumber,
-        folioNumber: extracted.folioNumber,
-        fundName: extracted.fundName,
-        
-        // Complete metadata
-        financialMetadata: extracted.financialMetadata || {},
-      },
-      keyPoints: extracted.keyPoints || [],
-      summary: this.generateSmartSummary(extracted),
-      attachmentAnalyses,
-    };
-  } catch (error) {
-    console.error('Error analyzing financial email:', error);
-    return this.fallbackFinancialAnalysis(data);
   }
-}
 
-private generateSmartSummary(data: EnhancedFinancialData): string {
-  const categoryEmoji = {
-    asset: '💰',
-    liability: '💳',
-    insurance: '🛡️',
-  }[data.assetCategory] || '📄';
+  private generateSmartSummary(data: EnhancedFinancialData): string {
+    const categoryEmoji = {
+      asset: '💰',
+      liability: '💳',
+      insurance: '🛡️',
+    }[data.assetCategory] || '📄';
 
-  const statusEmoji = {
-    active: '✅',
-    inactive: '❌',
-    pending: '⏳',
-    complete: '✔️',
-    missing: '⚠️',
-  }[data.status] || '';
+    const statusEmoji = {
+      active: '✅',
+      inactive: '❌',
+      pending: '⏳',
+      complete: '✔️',
+      missing: '⚠️',
+    }[data.status] || '';
 
-  return `${categoryEmoji} ${data.assetType} ${statusEmoji} | ${data.merchant} ${data.amount ? `- ₹${data.amount}` : ''} (${data.transactionType})`;
-}
+    return `${categoryEmoji} ${data.assetType} ${statusEmoji} | ${data.merchant} ${data.amount ? `- ₹${data.amount}` : ''} (${data.transactionType})`;
+  }
 
-// private fallbackFinancialAnalysis(
-//   data: FinancialAnalysisRequest
-// ): AnalysisResult {
-//   return {
-//     success: false,
-//     extractedData: {
-//       transactionType: 'other',
-//       amount: null,
-//       currency: 'USD',
-//       merchant: data.sender,
-//       description: data.subject || 'No description',
-//       date: new Date().toISOString().split('T')[0],
-//       accountNumber: null,
-//       confidence: 20,
-//       assetCategory: 'other',
-//       assetType: 'other',
-//       assetSubType: null,
-//       financialMetadata: {},
-//     },
-//     keyPoints: ['Unable to extract financial data'],
-//     summary: 'Analysis failed - manual review required',
-//   };
-// }
+  // private fallbackFinancialAnalysis(
+  //   data: FinancialAnalysisRequest
+  // ): AnalysisResult {
+  //   return {
+  //     success: false,
+  //     extractedData: {
+  //       transactionType: 'other',
+  //       amount: null,
+  //       currency: 'USD',
+  //       merchant: data.sender,
+  //       description: data.subject || 'No description',
+  //       date: new Date().toISOString().split('T')[0],
+  //       accountNumber: null,
+  //       confidence: 20,
+  //       assetCategory: 'other',
+  //       assetType: 'other',
+  //       assetSubType: null,
+  //       financialMetadata: {},
+  //     },
+  //     keyPoints: ['Unable to extract financial data'],
+  //     summary: 'Analysis failed - manual review required',
+  //   };
+  // }
 
 
   /**
@@ -823,7 +1146,7 @@ Response (just password or "false"):`;
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'gpt-3.5-turbo',
+            model: 'gpt-4o-mini',
             messages: [
               {
                 role: 'user',

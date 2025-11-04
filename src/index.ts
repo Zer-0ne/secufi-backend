@@ -7,6 +7,8 @@ import googleRouter from '@routes/google.routes'
 import userRouter from './routes/user.routes';
 import emailProcessingRouter from './routes/email-processing.routes';
 import smsRouter from './routes/sms.route';
+import vaultRoutes from './routes/vault.routes';
+import familyRoutes from './routes/family.routes';
 
 // Load environment variables
 config();
@@ -90,8 +92,8 @@ app.use('/api/google', googleRouter);
 app.use('/api/users', userRouter);
 app.use('/api/sms', smsRouter);
 app.use('/api/email-processing', emailProcessingRouter);
-// app.use('/api/auth', authRoutes);
-// app.use('/api/users', userRoutes);
+app.use('/api/family',familyRoutes)
+app.use('/api/vault', vaultRoutes);
 
 // ============================================
 // Error Handling

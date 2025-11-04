@@ -1,7 +1,8 @@
-import { PrismaClient } from '@prisma/client';
+import { Asset, PrismaClient } from '@prisma/client';
 import { AIService } from './ai.service';
 import * as fs from 'fs';
 import * as path from 'path';
+import { IAsset } from '@/config/interfaces';
 
 /**
  * Interface representing email data received from Gmail API
@@ -97,11 +98,102 @@ export class FinancialDataService {
    * console.log(`Found ${assets.length} assets`);
    * ```
    */
-  getAssetsByUserId = async (userId: string) => {
+  getAssetsByUserId = async (userId: string):Promise<Asset[]> => {
     return this.prisma.asset.findMany({
       where: { user_id: userId },
     });
   };
+
+
+  /***
+   * Get specific asset by ID for a user
+   * @param {string} assetId - Asset ID to fetch
+   * @param {string} userId - User ID who owns the asset
+   * @return {Promise<Asset[] | null>} Asset record or null if not found
+   * @example
+   * ```
+   * const asset = await service.getAssetById('asset-456', 'user-123');
+   * if (asset) {
+   *  console.log(`Asset Name: ${asset.name}`);
+   * } else {
+   * console.log('Asset not found');
+   * }
+   * ```
+   */
+  getAssetById = async (assetId: string, userId: string):Promise<Asset[]> => {
+    return await (this.prisma.asset.findMany({
+      where: { id: assetId, user_id: userId },
+    }));
+  };
+
+
+  /**
+   * Approve an asset by updating its status
+   * @param {string} assetId - Asset ID to approve
+   * @param {string} userId - User ID who owns the asset
+   * @param {string} status - New status to set (e.g., 'approved')
+   * @return {Promise<{
+   *  updatedData: Asset;
+   * status: any;
+   * }>} Updated asset record
+   * @example
+   * ```
+   * const updatedAsset = await service.approveAsset('asset-456
+   * ', 'user-123');
+   * console.log(`Asset ${updatedAsset.id} approved`);
+   * ```
+   */
+  approveAsset = async (assetId: string, userId: string, status: string): Promise<{
+    updatedData: Asset;
+    status: any;
+  }> => {
+    const Status = await this.prisma.asset.updateMany({
+      where: { id: assetId, user_id: userId },
+      data: { status: status || "needs_attention" },
+    });
+
+
+    return {
+      updatedData:
+        await (this.prisma.asset.findUnique({
+          where: { id: assetId },
+        }) as Promise<Asset>),
+      status: Status,
+    }
+  };
+
+
+  /**
+   * Edit the details of an existing asset
+   * @param {string} assetId - ID of the asset to edit
+   * @param {string} userId - ID of the user who owns the asset
+   * @param {Partial<Asset>} updates - Object containing fields to update
+   * @return {Promise<Asset>} - The updated asset record
+   * @example
+   * ```
+   * const updatedAsset = await service.editAsset('asset-456', 'user-123', {
+   *   name: 'Updated Asset Name',
+   *  balance: 15000.00,
+   * });
+   * console.log(`Asset ${updatedAsset.id} updated`);
+   * ```
+   * @throws {Error} If the asset is not found or the user is unauthorized
+   * 
+   */
+  updateAsset = async (assetId: string, userId: string, updates: Partial<any>): Promise<Asset> => {
+    const asset = await this.prisma.asset.findUnique({
+      where: { id: assetId },
+    });
+    if (!asset || asset.user_id !== userId) {
+      throw new Error('Asset not found or unauthorized');
+    }
+    return this.prisma.asset.update({
+      where: { id: assetId },
+      data: updates,
+    });
+  };
+
+
 
   /**
    * Process financial email with attachments
@@ -150,210 +242,211 @@ export class FinancialDataService {
    * - All IDs are tracked in transaction's extracted_data for easy cross-referencing
    */
   async processFinancialEmail(
-  userId: string,
-  emailData: EmailData
-): Promise<any> {
-  try {
-    console.log(`⟳ Processing financial email: ${emailData.subject}`);
+    userId: string,
+    emailData: EmailData
+  ): Promise<any> {
+    try {
+      console.log(`⟳ Processing financial email: ${emailData.subject}`);
 
-    const classification = await this.aiService.classifyEmailContent(emailData.body);
+      const classification = await this.aiService.classifyEmailContent(emailData.body);
 
-    if (!classification.isFinancial) {
-      return {
-        processed: false,
-        reason: 'Not a financial email',
-      };
-    }
-    
-    // Enhanced AI analysis
-    const emailAnalysis = await this.aiService.analyzeFinancialEmail({
-      emailContent: emailData.body,
-      subject: emailData.subject,
-      sender: emailData.from,
-      attachmentContents: emailData.attachmentContents,
-      documentType: this.guessDocumentType(emailData.subject),
-    });
-    
-    console.log('📊 Email Analysis:', emailAnalysis);
-
-    if (emailAnalysis.extractedData.confidence < 40) {
-      console.log(`⚠️ Low confidence: ${emailAnalysis.extractedData.confidence}%`);
-    }
-
-    let attachmentAnalyses: any[] = [];
-    const pdfDocumentIds: string[] = [];
-    const documentIds: string[] = [];
-    const assetIds: string[] = [];
-
-    // Process attachments
-    if (emailData.attachmentContents && emailData.attachmentContents.length > 0) {
-      for (const attachment of emailData.attachmentContents) {
-        const attachmentAnalysis = await this.aiService.analyzePDFDocument({
-          text: attachment.content,
-          documentType: this.guessDocumentType(attachment.filename),
-        });
-
-        const extracted = emailAnalysis.extractedData;
-
-        // Save to Asset with ALL new fields
-        const assetRecord = await this.prisma.asset.create({
-          data: {
-            user_id: userId,
-            name: `${extracted.assetCategory?.toUpperCase()}: ${extracted.merchant || attachment.filename}`,
-            
-            // 🎯 3-Category Classification
-            type: extracted.assetCategory,
-            sub_type: extracted.assetType,
-            
-            // 🏦 Bank Details
-            account_number: extracted.accountNumber,
-            ifsc_code: extracted.ifscCode,
-            branch_name: extracted.branchName,
-            bank_name: extracted.bankName,
-            
-            // 💰 Financial Values
-            balance: extracted.amount 
-              ? parseFloat(String(extracted.amount))
-              : extracted.financialMetadata?.currentValue
-              ? parseFloat(String(extracted.financialMetadata.currentValue))
-              : null,
-            
-            total_value: extracted.financialMetadata?.totalValue
-              ? parseFloat(String(extracted.financialMetadata.totalValue))
-              : null,
-            
-            // 📊 Status
-            status: extracted.status || 'active',
-            last_updated: new Date(),
-            
-            // 💳 Insurance/Investment Fields
-            policy_number: extracted.policyNumber,
-            folio_number: extracted.folioNumber,
-            fund_name: extracted.fundName,
-            
-            // 📄 Document Fields
-            document_type: extracted.assetType,
-            file_name: attachment.filename,
-            file_size: attachment.size,
-            mime_type: attachment.mimeType,
-            file_content: attachment.content,
-            
-            // 📋 Complete Metadata
-            document_metadata: {
-              // Classification
-              category: extracted.assetCategory,
-              type: extracted.assetType,
-              subType: extracted.assetSubType,
-              status: extracted.status,
-              
-              // AI Analysis
-              aiAnalysis: extracted,
-              attachmentAnalysis: attachmentAnalysis.extractedData,
-              confidence: extracted.confidence,
-              
-              // Financial Metadata
-              financialMetadata: extracted.financialMetadata,
-              
-              // Transaction Details
-              merchant: extracted.merchant,
-              description: extracted.description,
-              transactionDate: extracted.date,
-              currency: extracted.currency,
-              
-              // Document info
-              emailId: emailData.emailId,
-              emailSubject: emailData.subject,
-              emailSender: emailData.from,
-              extractedAt: new Date().toISOString(),
-              
-              // Key findings
-              keyPoints: emailAnalysis.keyPoints,
-            },
-            
-            email_id: emailData.emailId,
-          },
-        });
-        assetIds.push(assetRecord.id);
-
-        console.log(`✅ Saved: ${extracted.assetCategory} > ${extracted.assetType} [${extracted.status}]`);
-
-        attachmentAnalyses.push({
-          assetId: assetRecord.id,
-          fileName: attachment.filename,
-          category: extracted.assetCategory,
-          type: extracted.assetType,
-          status: extracted.status,
-          confidence: extracted.confidence,
-          analysis: attachmentAnalysis,
-        });
+      if (!classification.isFinancial) {
+        return {
+          processed: false,
+          reason: 'Not a financial email',
+        };
       }
-    }
 
-    // Create transaction
-    const transaction = await this.prisma.transaction.create({
-      data: {
-        user_id: userId,
-        email_id: emailData.emailId,
+      // Enhanced AI analysis
+      const emailAnalysis = await this.aiService.analyzeFinancialEmail({
+        emailContent: emailData.body,
         subject: emailData.subject,
         sender: emailData.from,
-        recipient: 'User',
-        amount: emailAnalysis.extractedData.amount
-          ? parseFloat(String(emailAnalysis.extractedData.amount))
-          : null,
-        currency: emailAnalysis.extractedData.currency || 'INR',
-        transaction_type: emailAnalysis.extractedData.transactionType,
-        merchant: emailAnalysis.extractedData.merchant,
-        description: emailAnalysis.extractedData.description,
-        transaction_date: emailAnalysis.extractedData.date
-          ? new Date(emailAnalysis.extractedData.date)
-          : new Date(),
-        email_date: new Date(emailData.date),
-        status: 'processed',
-        
-        raw_data: {
-          emailContent: emailData.body.substring(0, 500),
-          classification,
-          assetIds,
-        },
-        
-        extracted_data: {
-          ...emailAnalysis.extractedData,
-          assetIds,
-          attachmentSummary: attachmentAnalyses,
-        },
-      },
-    });
-
-    // Update asset relationships
-    if (assetIds.length > 0) {
-      await this.prisma.asset.updateMany({
-        where: { id: { in: assetIds } },
-        data: { transaction_id: transaction.id },
+        attachmentContents: emailData.attachmentContents,
+        documentType: this.guessDocumentType(emailData.subject),
       });
+
+      console.log('📊 Email Analysis:', emailAnalysis);
+
+      if (emailAnalysis.extractedData.confidence < 40) {
+        console.log(`⚠️ Low confidence: ${emailAnalysis.extractedData.confidence}%`);
+      }
+
+      let attachmentAnalyses: any[] = [];
+      const pdfDocumentIds: string[] = [];
+      const documentIds: string[] = [];
+      const assetIds: string[] = [];
+
+      // Process attachments
+      if (emailData.attachmentContents && emailData.attachmentContents.length > 0) {
+        for (const attachment of emailData.attachmentContents) {
+          const attachmentAnalysis = await this.aiService.analyzePDFDocument({
+            text: attachment.content,
+            documentType: this.guessDocumentType(attachment.filename),
+          });
+
+          const extracted = emailAnalysis.extractedData;
+
+          // Save to Asset with ALL new fields
+          const assetRecord = await this.prisma.asset.create({
+            data: {
+              user_id: userId,
+              name: `${extracted.assetCategory?.toUpperCase()}: ${extracted.merchant || attachment.filename}`,
+
+              // 🎯 3-Category Classification
+              type: extracted.assetCategory,
+              sub_type: extracted.assetType,
+
+              // 🏦 Bank Details
+              account_number: extracted.accountNumber,
+              ifsc_code: extracted.ifscCode,
+              branch_name: extracted.branchName,
+              bank_name: extracted.bankName,
+
+              // 💰 Financial Values
+              balance: extracted.amount
+                ? parseFloat(String(extracted.amount))
+                : extracted.financialMetadata?.currentValue
+                  ? parseFloat(String(extracted.financialMetadata.currentValue))
+                  : null,
+
+              total_value: extracted.financialMetadata?.totalValue
+                ? parseFloat(String(extracted.financialMetadata.totalValue))
+                : null,
+
+              // 📊 Status
+              // status: extracted.status || 'active', // Deprecated
+              status: 'pending',
+              last_updated: new Date(),
+
+              // 💳 Insurance/Investment Fields
+              policy_number: extracted.policyNumber,
+              folio_number: extracted.folioNumber,
+              fund_name: extracted.fundName,
+
+              // 📄 Document Fields
+              document_type: extracted.assetType,
+              file_name: attachment.filename,
+              file_size: attachment.size,
+              mime_type: attachment.mimeType,
+              file_content: attachment.content,
+
+              // 📋 Complete Metadata
+              document_metadata: {
+                // Classification
+                category: extracted.assetCategory,
+                type: extracted.assetType,
+                subType: extracted.assetSubType,
+                status: extracted.status,
+
+                // AI Analysis
+                aiAnalysis: extracted,
+                attachmentAnalysis: attachmentAnalysis.extractedData,
+                confidence: extracted.confidence,
+
+                // Financial Metadata
+                financialMetadata: extracted.financialMetadata,
+
+                // Transaction Details
+                merchant: extracted.merchant,
+                description: extracted.description,
+                transactionDate: extracted.date,
+                currency: extracted.currency,
+
+                // Document info
+                emailId: emailData.emailId,
+                emailSubject: emailData.subject,
+                emailSender: emailData.from,
+                extractedAt: new Date().toISOString(),
+
+                // Key findings
+                keyPoints: emailAnalysis.keyPoints,
+              },
+
+              email_id: emailData.emailId,
+            },
+          });
+          assetIds.push(assetRecord.id);
+
+          console.log(`✅ Saved: ${extracted.assetCategory} > ${extracted.assetType} [${extracted.status}]`);
+
+          attachmentAnalyses.push({
+            assetId: assetRecord.id,
+            fileName: attachment.filename,
+            category: extracted.assetCategory,
+            type: extracted.assetType,
+            status: extracted.status,
+            confidence: extracted.confidence,
+            analysis: attachmentAnalysis,
+          });
+        }
+      }
+
+      // Create transaction
+      const transaction = await this.prisma.transaction.create({
+        data: {
+          user_id: userId,
+          email_id: emailData.emailId,
+          subject: emailData.subject,
+          sender: emailData.from,
+          recipient: 'User',
+          amount: emailAnalysis.extractedData.amount
+            ? parseFloat(String(emailAnalysis.extractedData.amount))
+            : null,
+          currency: emailAnalysis.extractedData.currency || 'INR',
+          transaction_type: emailAnalysis.extractedData.transactionType,
+          merchant: emailAnalysis.extractedData.merchant,
+          description: emailAnalysis.extractedData.description,
+          transaction_date: emailAnalysis.extractedData.date
+            ? new Date(emailAnalysis.extractedData.date)
+            : new Date(),
+          email_date: new Date(emailData.date),
+          status: 'processed',
+
+          raw_data: {
+            emailContent: emailData.body.substring(0, 500),
+            classification,
+            assetIds,
+          },
+
+          extracted_data: {
+            ...emailAnalysis.extractedData,
+            assetIds,
+            attachmentSummary: attachmentAnalyses,
+          },
+        },
+      });
+
+      // Update asset relationships
+      if (assetIds.length > 0) {
+        await this.prisma.asset.updateMany({
+          where: { id: { in: assetIds } },
+          data: { transaction_id: transaction.id },
+        });
+      }
+
+      console.log(`✅ Transaction: ${transaction.id}`);
+      console.log(`📁 Assets created: ${assetIds.length}`);
+
+      return {
+        processed: true,
+        transactionId: transaction.id,
+        emailAnalysis: {
+          summary: emailAnalysis.summary,
+          keyPoints: emailAnalysis.keyPoints,
+          extractedData: emailAnalysis.extractedData,
+        },
+        attachmentAnalyses,
+        assetIds,
+      };
+    } catch (error) {
+      console.error('❌ Error:', error);
+      return {
+        processed: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
     }
-
-    console.log(`✅ Transaction: ${transaction.id}`);
-    console.log(`📁 Assets created: ${assetIds.length}`);
-
-    return {
-      processed: true,
-      transactionId: transaction.id,
-      emailAnalysis: {
-        summary: emailAnalysis.summary,
-        keyPoints: emailAnalysis.keyPoints,
-        extractedData: emailAnalysis.extractedData,
-      },
-      attachmentAnalyses,
-      assetIds,
-    };
-  } catch (error) {
-    console.error('❌ Error:', error);
-    return {
-      processed: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    };
   }
-}
 
 
   /**
@@ -933,11 +1026,11 @@ ${markdown
         averageConfidence:
           pdfs.length > 0
             ? (
-                pdfs.reduce(
-                  (sum, p) => sum + ((p.extracted_data as any)?.confidence || 0),
-                  0
-                ) / pdfs.length
-              ).toFixed(1)
+              pdfs.reduce(
+                (sum, p) => sum + ((p.extracted_data as any)?.confidence || 0),
+                0
+              ) / pdfs.length
+            ).toFixed(1)
             : 0,
         byType: this.groupByType(transactions),
         byDocumentType: this.groupByDocumentType(documents),
@@ -1212,9 +1305,9 @@ ${markdown
         averageTransactionAmount:
           transactions.length > 0
             ? (
-                transactions.reduce((sum, t) => sum + (t.amount?.toNumber() || 0), 0) /
-                transactions.length
-              ).toFixed(2)
+              transactions.reduce((sum, t) => sum + (t.amount?.toNumber() || 0), 0) /
+              transactions.length
+            ).toFixed(2)
             : 0,
       };
     } catch (error) {

@@ -6,6 +6,9 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+// ============================================================================
+// User Model with Family Management
+// ============================================================================
 
 model User {
   id                   String    @id @default(uuid()) @db.Uuid
@@ -37,13 +40,23 @@ model User {
   
   // Financial information
   pan_number           String?   @unique @db.VarChar(10)
+  aadhar_number        String?   @unique @db.VarChar(12)
+  gstin                String?   @unique @db.VarChar(15)
   asset_preference     Json?     @default("{}")
   customer_id          String?   @db.VarChar(50)
   account_number       String?   @db.VarChar(50)
   
-  // Family role
-  family_role          String?
+  // Family Relations
+  family_memberships   FamilyMember[] @relation("UserFamilies")
   
+  // Family Ownership (if this user is the family head/owner)
+  owned_families       Family[]  @relation("FamilyOwner")
+  
+  // Family Invitations - Explicit relation names
+  invitations_sent     FamilyInvitation[] @relation("InvitedBy")
+  invitations_received FamilyInvitation[] @relation("InvitedUser")
+  
+  // Audit fields
   created_at           DateTime  @default(now())
   updated_at           DateTime  @updatedAt
   
@@ -56,6 +69,7 @@ model User {
   google_credentials   GoogleCredential?
   family_access_as_parent FamilyAccess[] @relation("ParentUser")
   family_access_as_family FamilyAccess[] @relation("FamilyUser")
+  activity_logs        ActivityLog[]
   
   @@index([email])
   @@index([phone])
@@ -66,6 +80,252 @@ model User {
   @@index([otp_expires_at])
   @@map("users")
 }
+
+
+// ============================================================================
+// Family Model - Represents a family group
+// ============================================================================
+
+model Family {
+  id                String    @id @default(uuid()) @db.Uuid
+  
+  // Basic Info
+  name              String    @db.VarChar(100)
+  description       String?   @db.Text
+  
+  // Owner/Admin
+  owner_id          String    @db.Uuid
+  owner             User      @relation("FamilyOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+  
+  // Members
+  members           FamilyMember[] @relation("FamilyMembers")
+  
+  // Settings
+  settings          FamilySettings?
+  
+  // Roles & Permissions
+  roles             FamilyRole[]
+  
+  // Member requests/invitations
+  invitations       FamilyInvitation[]
+  
+  // Audit
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  
+  @@index([owner_id])
+  @@index([name])
+  @@map("families")
+}
+
+
+// Add this new model
+model FamilyMember {
+  id                String    @id @default(uuid()) @db.Uuid
+  
+  family_id         String    @db.Uuid
+  family            Family    @relation("FamilyMembers", fields: [family_id], references: [id], onDelete: Cascade)
+  
+  user_id           String    @db.Uuid
+  user              User      @relation("UserFamilies", fields: [user_id], references: [id], onDelete: Cascade)
+  
+  // Role in this specific family
+  role              String    @db.VarChar(20) // "owner", "admin", "member", "viewer"
+  
+  // Permissions for this membership
+  can_view          Boolean   @default(true)
+  can_edit          Boolean   @default(false)
+  can_delete        Boolean   @default(false)
+  can_invite        Boolean   @default(false)
+  
+  // Membership status
+  is_active         Boolean   @default(true)
+  joined_at         DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  
+  @@unique([family_id, user_id])
+  @@index([family_id])
+  @@index([user_id])
+  @@index([role])
+  @@map("family_members")
+}
+
+
+// ============================================================================
+// Family Invitation Model - WITH EXPLICIT RELATION NAMES
+// ============================================================================
+
+model FamilyInvitation {
+  id                String    @id @default(uuid()) @db.Uuid
+  
+  // Invitation Details
+  family_id         String    @db.Uuid
+  family            Family    @relation(fields: [family_id], references: [id], onDelete: Cascade)
+  
+  // User who sent the invitation
+  invited_by_id     String    @db.Uuid
+  invited_by        User      @relation("InvitedBy", fields: [invited_by_id], references: [id], onDelete: Cascade)
+  
+  // Invitee info (User who received the invitation)
+  invited_email     String    @db.VarChar(255)
+  invited_user_id   String?   @db.Uuid
+  invited_user      User?     @relation("InvitedUser", fields: [invited_user_id], references: [id], onDelete: SetNull)
+  
+  // Invitation Status
+  status            String    @default("pending") @db.VarChar(20) // "pending", "accepted", "rejected", "expired"
+  role              String    @default("member") @db.VarChar(20)
+  
+  // Expiration
+  expires_at        DateTime?
+  accepted_at       DateTime?
+  rejected_at       DateTime?
+  
+  // Audit
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  
+  @@unique([family_id, invited_email])
+  @@index([family_id])
+  @@index([invited_by_id])
+  @@index([invited_user_id])
+  @@index([invited_email])
+  @@index([status])
+  @@map("family_invitations")
+}
+
+// ============================================================================
+// Family Settings Model
+// ============================================================================
+
+model FamilySettings {
+  id                String    @id @default(uuid()) @db.Uuid
+  
+  family_id         String    @unique @db.Uuid
+  family            Family    @relation(fields: [family_id], references: [id], onDelete: Cascade)
+  
+  // Privacy Settings
+  can_share_assets  Boolean   @default(true)
+  can_view_others   Boolean   @default(true)
+  require_approval  Boolean   @default(false)
+  
+  // Financial Settings
+  currency          String    @default("INR") @db.VarChar(10)
+  financial_year_start String @default("01-04") // Format: MM-DD
+  
+  // Notifications
+  notify_large_transactions Boolean @default(true)
+  large_transaction_threshold Float @default(100000)
+  
+  // Metadata
+  data              Json?     @default("{}")
+  
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  
+  @@index([family_id])
+  @@map("family_settings")
+}
+
+// ============================================================================
+// Family Role Model - Define roles and permissions
+// ============================================================================
+
+model FamilyRole {
+  id                String    @id @default(uuid()) @db.Uuid
+  
+  family_id         String    @db.Uuid
+  family            Family    @relation(fields: [family_id], references: [id], onDelete: Cascade)
+  
+  // Role Details
+  name              String    @db.VarChar(50) // "owner", "admin", "member", "viewer"
+  description       String?   @db.Text
+  
+  // Permissions (stored as JSON for flexibility)
+  permissions       Json      @default("{}") 
+  
+  is_default        Boolean   @default(false)
+  
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  
+  @@unique([family_id, name])
+  @@index([family_id])
+  @@map("family_roles")
+}
+
+// ============================================================================
+// Family Access Model (for tracking specific access grants)
+// ============================================================================
+
+model FamilyAccess {
+  id                String    @id @default(uuid()) @db.Uuid
+  
+  // Parent-Child relationship
+  parent_user_id    String    @db.Uuid
+  parent_user       User      @relation("ParentUser", fields: [parent_user_id], references: [id], onDelete: Cascade)
+  
+  child_user_id     String    @db.Uuid
+  child_user        User      @relation("FamilyUser", fields: [child_user_id], references: [id], onDelete: Cascade)
+  
+  // Access Type
+  access_type       String    @db.VarChar(50) // "view", "edit", "full"
+  
+  // Resource Access
+  can_view_assets   Boolean   @default(true)
+  can_edit_assets   Boolean   @default(false)
+  can_delete_assets Boolean   @default(false)
+  
+  // Status
+  is_active         Boolean   @default(true)
+  
+  // Restrictions
+  access_until      DateTime?
+  
+  created_at        DateTime  @default(now())
+  updated_at        DateTime  @updatedAt
+  
+  @@unique([parent_user_id, child_user_id])
+  @@index([parent_user_id])
+  @@index([child_user_id])
+  @@map("family_access")
+}
+
+// ============================================================================
+// Activity Log Model - Track family activities
+// ============================================================================
+
+model ActivityLog {
+  id                String    @id @default(uuid()) @db.Uuid
+  
+  user_id           String    @db.Uuid
+  user              User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  // Activity Details
+  action            String    @db.VarChar(100) // "create_asset", "update_asset", "share_data", etc.
+  entity_type       String    @db.VarChar(50) // "asset", "transaction", "family_member"
+  entity_id         String?   @db.VarChar(100)
+  
+  // Change tracking
+  changes           Json?     @default("{}")
+  old_values        Json?     @default("{}")
+  new_values        Json?     @default("{}")
+  
+  // Metadata
+  ip_address        String?   @db.VarChar(45)
+  user_agent        String?   @db.Text
+  
+  created_at        DateTime  @default(now())
+  
+  @@index([user_id])
+  @@index([action])
+  @@index([created_at])
+  @@index([entity_type])
+  @@map("activity_logs")
+}
+
+// ============================================================================
+// Google Credentials Model
+// ============================================================================
 
 model GoogleCredential {
   id                 String    @id @default(uuid()) @db.Uuid
@@ -98,6 +358,10 @@ model GoogleCredential {
   @@map("google_credentials")
 }
 
+// ============================================================================
+// Session Model
+// ============================================================================
+
 model Session {
   id            String   @id @default(uuid()) @db.Uuid
   user_id       String   @db.Uuid
@@ -113,6 +377,10 @@ model Session {
   @@index([user_id])
   @@map("sessions")
 }
+
+// ============================================================================
+// Transaction Model
+// ============================================================================
 
 model Transaction {
   id               String            @id @default(uuid()) @db.Uuid
@@ -146,6 +414,10 @@ model Transaction {
   @@map("transactions")
 }
 
+// ============================================================================
+// PDF Document Model
+// ============================================================================
+
 model PdfDocument {
   id                    String           @id @default(uuid()) @db.Uuid
   user_id               String           @db.Uuid
@@ -174,6 +446,10 @@ model PdfDocument {
   @@index([upload_source])
   @@map("pdf_documents")
 }
+
+// ============================================================================
+// Document Model
+// ============================================================================
 
 model Document {
   id                    String              @id @default(uuid()) @db.Uuid
@@ -229,6 +505,11 @@ model Document {
   @@index([confidence_score])
   @@map("documents")
 }
+
+// ============================================================================
+// Asset Model
+// ============================================================================
+
 model Asset {
   id                String         @id @default(uuid()) @db.Uuid
   user_id           String         @db.Uuid
@@ -281,7 +562,6 @@ model Asset {
   
   // Relations
   user              User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  family_access     FamilyAccess[]
   
   @@index([user_id])
   @@index([type])
@@ -293,30 +573,10 @@ model Asset {
   @@map("assets")
 }
 
+// ============================================================================
+// Enums
+// ============================================================================
 
-model FamilyAccess {
-  id             String    @id @default(uuid()) @db.Uuid
-  parent_user_id String    @db.Uuid
-  family_user_id String    @db.Uuid
-  asset_id       String    @db.Uuid
-  access_expiry  DateTime?
-  can_edit       Boolean   @default(false)
-  created_at     DateTime  @default(now())
-  updated_at     DateTime  @updatedAt
-  
-  parent_user    User      @relation("ParentUser", fields: [parent_user_id], references: [id], onDelete: Cascade)
-  family_user    User      @relation("FamilyUser", fields: [family_user_id], references: [id], onDelete: Cascade)
-  asset          Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
-  
-  @@unique([parent_user_id, family_user_id, asset_id])
-  @@index([parent_user_id])
-  @@index([family_user_id])
-  @@index([asset_id])
-  @@index([access_expiry])
-  @@map("family_access")
-}
-
-// Transaction Type Enum
 enum TransactionType {
   payment
   receipt
@@ -328,14 +588,12 @@ enum TransactionType {
   other
 }
 
-// Transaction Status Enum
 enum TransactionStatus {
   pending
   processed
   failed
 }
 
-// Parsing Status Enum
 enum ParsingStatus {
   pending
   processing
@@ -343,14 +601,12 @@ enum ParsingStatus {
   failed
 }
 
-// Upload Source Enum
 enum UploadSource {
   gmail
   manual
   api
 }
 
-// Gap Detection Status Enum
 enum GapDetectionStatus {
   pending
   processing
@@ -358,7 +614,6 @@ enum GapDetectionStatus {
   failed
 }
 
-// Auto Fill Status Enum
 enum AutoFillStatus {
   pending
   processing
@@ -367,7 +622,6 @@ enum AutoFillStatus {
   manual_review
 }
 
-// Processing Method Enum
 enum ProcessingMethod {
   dynamicpdf
   dynamicpdf_unlocked
