@@ -1,0 +1,384 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                   String    @id @default(uuid()) @db.Uuid
+  name                 String?
+  email                String?   @unique
+  role                 String?   @default("user")
+  password             String?
+  
+  // OTP Authentication Fields
+  otp                  String?   @db.VarChar(6)
+  otp_expires_at       DateTime?
+  
+  // User Type
+  user_type            String?   @default("parent") @db.VarChar(20)
+  
+  // Google OAuth fields
+  google_id            String?   @unique
+  google_email         String?
+  profile_picture      String?   @db.Text
+  is_google_user       Boolean   @default(false)
+  is_verified          Boolean   @default(false)
+  is_active            Boolean   @default(true)
+  last_login           DateTime?
+  
+  // Contact Information
+  phone                String?   @unique @db.VarChar(15)
+  address              String?   @db.Text
+  date_of_birth        DateTime?
+  
+  // Financial information
+  pan_number           String?   @unique @db.VarChar(10)
+  asset_preference     Json?     @default("{}")
+  customer_id          String?   @db.VarChar(50)
+  account_number       String?   @db.VarChar(50)
+  
+  // Family role
+  family_role          String?
+  
+  created_at           DateTime  @default(now())
+  updated_at           DateTime  @updatedAt
+  
+  // Relations
+  transactions         Transaction[]
+  pdf_documents        PdfDocument[]
+  documents            Document[]
+  sessions             Session[]
+  assets               Asset[]
+  google_credentials   GoogleCredential?
+  family_access_as_parent FamilyAccess[] @relation("ParentUser")
+  family_access_as_family FamilyAccess[] @relation("FamilyUser")
+  
+  @@index([email])
+  @@index([phone])
+  @@index([google_id])
+  @@index([is_active])
+  @@index([role])
+  @@index([user_type])
+  @@index([otp_expires_at])
+  @@map("users")
+}
+
+model GoogleCredential {
+  id                 String    @id @default(uuid()) @db.Uuid
+  user_id            String    @unique @db.Uuid
+  
+  // Encrypted credentials (AES)
+  encrypted_access_token String  @db.Text
+  encrypted_refresh_token String @db.Text
+  
+  // Token expiry
+  access_token_expires_at DateTime
+  refresh_token_expires_at DateTime
+  
+  // IV for AES (stored separately for decryption)
+  access_token_iv    String    @db.VarChar(32)
+  refresh_token_iv   String    @db.VarChar(32)
+  
+  // Auto-expiry field (for cleanup)
+  expires_at         DateTime
+  
+  // Metadata
+  created_at         DateTime  @default(now())
+  updated_at         DateTime  @updatedAt
+  
+  user               User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  @@index([user_id])
+  @@index([expires_at])
+  @@index([access_token_expires_at])
+  @@map("google_credentials")
+}
+
+model Session {
+  id            String   @id @default(uuid()) @db.Uuid
+  user_id       String   @db.Uuid
+  session_token String   @unique
+  expires_at    DateTime
+  created_at    DateTime @default(now())
+  updated_at    DateTime @updatedAt
+  
+  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  @@index([session_token])
+  @@index([expires_at])
+  @@index([user_id])
+  @@map("sessions")
+}
+
+model Transaction {
+  id               String            @id @default(uuid()) @db.Uuid
+  user_id          String            @db.Uuid
+  email_id         String
+  subject          String?           @db.Text
+  sender           String
+  recipient        String
+  amount           Decimal?          @db.Decimal(15, 2)
+  currency         String?           @default("USD") @db.VarChar(3)
+  transaction_type TransactionType   @default(other)
+  merchant         String?
+  description      String?           @db.Text
+  transaction_date DateTime?
+  email_date       DateTime
+  status           TransactionStatus @default(pending)
+  raw_data         Json?
+  extracted_data   Json?
+  created_at       DateTime          @default(now())
+  updated_at       DateTime          @updatedAt
+  
+  user             User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  pdf_documents    PdfDocument[]
+  
+  @@index([user_id])
+  @@index([email_id])
+  @@index([transaction_type])
+  @@index([transaction_date])
+  @@index([status])
+  @@index([sender])
+  @@map("transactions")
+}
+
+model PdfDocument {
+  id                    String           @id @default(uuid()) @db.Uuid
+  user_id               String           @db.Uuid
+  transaction_id        String?          @db.Uuid
+  filename              String           @db.VarChar(500)
+  original_filename     String           @db.VarChar(500)
+  file_path             String?          @db.Text
+  file_size             BigInt
+  mime_type             String           @default("application/pdf") @db.VarChar(100)
+  parsing_status        ParsingStatus    @default(completed)
+  parsing_error         String?          @db.Text
+  extracted_text        String?          @db.Text
+  extracted_data        Json?
+  page_count            Int?
+  upload_source         UploadSource     @default(gmail)
+  gmail_attachment_id   String?          @db.VarChar(500)
+  created_at            DateTime         @default(now())
+  updated_at            DateTime         @updatedAt
+  
+  user                  User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  transaction           Transaction?     @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
+  
+  @@index([user_id])
+  @@index([transaction_id])
+  @@index([parsing_status])
+  @@index([upload_source])
+  @@map("pdf_documents")
+}
+
+model Document {
+  id                    String              @id @default(uuid()) @db.Uuid
+  user_id               String              @db.Uuid
+  filename              String
+  original_filename     String
+  file_path             String?             @db.Text
+  file_size             BigInt
+  mime_type             String              @default("application/pdf")
+  upload_source         String?             @default("gmail")
+  
+  // Parsing status and results
+  parsing_status        ParsingStatus       @default(completed)
+  parsing_error         String?             @db.Text
+  extracted_text        String?             @db.Text
+  
+  // AI Classification results
+  document_type         String?
+  document_category     String?
+  confidence_score      Float?
+  
+  // Structured extracted data
+  extracted_data        Json?
+  
+  // Gap detection and auto-fill
+  gap_detection_status  GapDetectionStatus  @default(pending)
+  detected_gaps         Json?
+  auto_fill_attempts    Json?
+  auto_fill_status      AutoFillStatus      @default(pending)
+  
+  // Processing metadata
+  processing_method     ProcessingMethod?
+  processing_duration   Int?
+  ai_model_used         String?
+  
+  // Document metadata
+  page_count            Int?
+  is_password_protected Boolean             @default(false)
+  password              String?             @db.Text
+  
+  // Quality and validation
+  data_quality_score    Float?
+  validation_errors     Json?
+  
+  created_at            DateTime            @default(now())
+  updated_at            DateTime            @updatedAt
+  
+  user                  User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  
+  @@index([user_id])
+  @@index([parsing_status])
+  @@index([document_type])
+  @@index([confidence_score])
+  @@map("documents")
+}
+model Asset {
+  id                String         @id @default(uuid()) @db.Uuid
+  user_id           String         @db.Uuid
+  name              String?
+  
+  // 🎯 Main Category (3 types)
+  type              String         // 'asset' | 'liability' | 'insurance'
+  sub_type          String?        // Detailed type within category
+  
+  // 🏦 Bank/Financial Account Details
+  account_number    String?        @db.VarChar(50)
+  ifsc_code         String?        @db.VarChar(11)
+  branch_name       String?        @db.VarChar(200)
+  bank_name         String?        @db.VarChar(200)
+  
+  // 💰 Financial Values
+  balance           Decimal?       @db.Decimal(15, 2)
+  total_value       Decimal?       @db.Decimal(15, 2)   // Current value
+  
+  // 📊 Status & Tracking
+  status            String?        @default("active")    // 'active' | 'inactive' | 'pending' | 'complete' | 'missing'
+  last_updated      DateTime       @default(now())
+  
+  // 🏢 Address & Location
+  address           String?        @db.Text
+  
+  // 👤 Nominee/Beneficiary Details
+  nominee           Json?          @default("[]")        // [{name, relation, percentage}]
+  
+  // 💳 Insurance Specific Fields
+  policy_number     String?        @db.VarChar(100)
+  fund_name         String?        @db.VarChar(200)     // For mutual funds
+  folio_number      String?        @db.VarChar(100)     // For mutual funds/insurance
+  
+  // 📄 Document/Attachment Fields
+  document_type     String?        // "invoice", "statement", "receipt", etc.
+  document_metadata Json?          // Store AI analysis here
+  file_name         String?
+  file_size         Int?
+  mime_type         String?
+  file_content      String?        @db.Text             // Base64 content or file path
+  
+  // 🔗 References
+  transaction_id    String?        @db.Uuid
+  email_id          String?
+  
+  // ⏰ Timestamps
+  created_at        DateTime       @default(now())
+  updated_at        DateTime       @updatedAt
+  
+  // Relations
+  user              User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  family_access     FamilyAccess[]
+  
+  @@index([user_id])
+  @@index([type])
+  @@index([sub_type])
+  @@index([status])
+  @@index([transaction_id])
+  @@index([account_number])
+  @@index([policy_number])
+  @@map("assets")
+}
+
+
+model FamilyAccess {
+  id             String    @id @default(uuid()) @db.Uuid
+  parent_user_id String    @db.Uuid
+  family_user_id String    @db.Uuid
+  asset_id       String    @db.Uuid
+  access_expiry  DateTime?
+  can_edit       Boolean   @default(false)
+  created_at     DateTime  @default(now())
+  updated_at     DateTime  @updatedAt
+  
+  parent_user    User      @relation("ParentUser", fields: [parent_user_id], references: [id], onDelete: Cascade)
+  family_user    User      @relation("FamilyUser", fields: [family_user_id], references: [id], onDelete: Cascade)
+  asset          Asset     @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+  
+  @@unique([parent_user_id, family_user_id, asset_id])
+  @@index([parent_user_id])
+  @@index([family_user_id])
+  @@index([asset_id])
+  @@index([access_expiry])
+  @@map("family_access")
+}
+
+// Transaction Type Enum
+enum TransactionType {
+  payment
+  receipt
+  invoice
+  statement
+  tax
+  credit_card
+  bill
+  other
+}
+
+// Transaction Status Enum
+enum TransactionStatus {
+  pending
+  processed
+  failed
+}
+
+// Parsing Status Enum
+enum ParsingStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+// Upload Source Enum
+enum UploadSource {
+  gmail
+  manual
+  api
+}
+
+// Gap Detection Status Enum
+enum GapDetectionStatus {
+  pending
+  processing
+  completed
+  failed
+}
+
+// Auto Fill Status Enum
+enum AutoFillStatus {
+  pending
+  processing
+  completed
+  failed
+  manual_review
+}
+
+// Processing Method Enum
+enum ProcessingMethod {
+  dynamicpdf
+  dynamicpdf_unlocked
+  dynamicpdf_unlock_failed
+  pdf_parse
+  pdf_lib
+  pdf_lib_ignore_encryption
+  pdf_lib_ignore_copy
+  pdf_parse_no_password
+  pdf_parse_empty_password
+  ai
+  regex
+  hybrid
+}

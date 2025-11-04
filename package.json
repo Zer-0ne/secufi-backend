@@ -1,0 +1,81 @@
+{
+  "name": "optimized_secufi_backend",
+  "version": "1.0.0",
+  "description": "",
+  "keywords": [
+    "secufi",
+    "backend"
+  ],
+  "homepage": "https://github.com/secufi-dev/secufi-backend#readme",
+  "bugs": {
+    "url": "https://github.com/secufi-dev/secufi-backend/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/secufi-dev/secufi-backend.git"
+  },
+  "license": "ISC",
+  "author": "younglabs",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "build": "prisma generate && tsc && tsc-alias",
+    "dev": "prisma generate && prisma db push --accept-data-loss &&  tsx watch src/index.ts",
+    "dev:auto": "concurrently \"npm run watch:prisma\" \"npm run dev:server\"",
+    "dev:server": "prisma generate && prisma db push --accept-data-loss && tsx watch src/index.ts",
+    "watch:prisma": "nodemon --watch prisma/schema.prisma --exec \"npm run prisma:auto-update\"",
+    "prisma:auto-update": "echo 'Prisma schema changed, updating...' && prisma generate && prisma db push --accept-data-loss",
+    "dev:debug": "prisma generate && ts-node-dev -r tsconfig-paths/register --respawn --transpile-only --inspect --clear --notify src/index.ts",
+    "dev:fast": "prisma generate && ts-node-dev -r tsconfig-paths/register --respawn --transpile-only --clear --notify --poll --ignore-watch node_modules --ignore-watch dist src/index.ts",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:push": "prisma db push",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:migrate:deploy": "prisma migrate deploy",
+    "prisma:studio": "prisma studio",
+    "prisma:seed": "ts-node prisma/seed.ts",
+    "prisma:reset": "prisma migrate reset",
+    "db:setup": "prisma generate && prisma db push",
+    "db:setup:prod": "prisma generate && prisma migrate deploy",
+    "dev:prisma": "concurrently \"npm run dev\" \"npm run prisma:studio\"",
+    "dev:safe": "concurrently \"npm run watch:prisma:safe\" \"npm run dev:server:safe\"",
+    "dev:full:safe": "concurrently \"npm run watch:prisma:safe\" \"npm run dev:server:safe\" \"npm run prisma:studio\"",
+    "dev:server:safe": "prisma generate && prisma db push --accept-data-loss && tsx watch src/index.ts",
+    "watch:prisma:safe": "nodemon --watch prisma/schema.prisma --exec \"npm run prisma:safe-update\"",
+    "prisma:safe-update": "echo 'Prisma schema changed, updating safely...' && prisma generate && prisma db push --accept-data-loss || echo 'Update failed, continuing...'",
+    "postinstall": "prisma generate"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.18.0",
+    "bcryptjs": "^3.0.2",
+    "bufferutil": "^4.0.9",
+    "cors": "^2.8.5",
+    "docx": "^9.5.1",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "googleapis": "^164.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "pdf-parse": "^2.4.5",
+    "tsconfig-paths": "^4.2.0",
+    "utf-8-validate": "^6.0.5",
+    "ws": "^8.18.3",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.5",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.9.2",
+    "@types/pdf-parse": "^1.1.5",
+    "@types/ws": "^8.18.1",
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.10",
+    "prisma": "^6.18.0",
+    "ts-node": "^10.9.2",
+    "tsc-alias": "^1.8.16",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

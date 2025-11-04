@@ -1,0 +1,76 @@
+{
+  // Visit https://aka.ms/tsconfig to read more about this file
+  "compilerOptions": {
+    // File Layout
+    "rootDir": "./src",
+    "baseUrl": "./",
+    "outDir": "./dist",
+
+    // Environment Settings
+    // See also https://aka.ms/tsconfig/module
+    "module": "es6",
+    "target": "esnext",
+    "moduleResolution": "node",
+
+    "types": [],
+    // For nodejs:
+    "lib": ["esnext"],
+    // "types": ["node"],
+    // and npm install -D @types/node
+
+    // Other Outputs
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+
+    // Stricter Typechecking Options
+    // "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "strictPropertyInitialization": false ,
+    
+
+    // Style Options
+    "noImplicitReturns": true,
+    "noImplicitOverride": true,
+    // "noUnusedLocals": true, // this is the strict rule for unsed variables if it is true you should avoid to create unused variable
+    // "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    // "noPropertyAccessFromIndexSignature": true,
+    "allowSyntheticDefaultImports":true,
+    // "esModuleInterop": true,
+
+    // Recommended Options
+    "strict": true,
+    "jsx": "react-jsx",
+    // "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true,
+
+
+     // path mapping
+     "paths": {
+      "@/*": ["src/*"],
+      "@config/*": ["src/config/*"],
+      "@controllers/*": ["src/controllers/*"],
+      "@models/*": ["src/models/*"],
+      "@routes/*": ["src/routes/*"],
+      "@middlewares/*": ["src/middlewares/*"],
+      "@utils/*": ["src/utils/*"],
+      "@services/*": ["src/services/*"],
+      "@types/*": ["src/types/*"]
+    },
+  },
+  "ts-node": {
+    "esm": true
+  },
+  // tsc-alias configuration
+  "tsc-alias": {
+    "verbose": false,
+    "resolveFullPaths": true,
+    "resolveFullExtension": ".js"
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
