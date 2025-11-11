@@ -9,6 +9,7 @@ import emailProcessingRouter from './routes/email-processing.routes';
 import smsRouter from './routes/sms.route';
 import vaultRoutes from './routes/vault.routes';
 import familyRoutes from './routes/family.routes';
+import assetSharingRouter from './routes/asset-sharing.routes';
 
 // Load environment variables
 config();
@@ -94,6 +95,7 @@ app.use('/api/sms', smsRouter);
 app.use('/api/email-processing', emailProcessingRouter);
 app.use('/api/family',familyRoutes)
 app.use('/api/vault', vaultRoutes);
+app.use('/api/asset-sharing',assetSharingRouter)
 
 // ============================================
 // Error Handling

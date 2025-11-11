@@ -2,7 +2,6 @@ import { Asset, PrismaClient } from '@prisma/client';
 import { AIService } from './ai.service';
 import * as fs from 'fs';
 import * as path from 'path';
-import { IAsset } from '@/config/interfaces';
 
 /**
  * Interface representing email data received from Gmail API
@@ -98,53 +97,173 @@ export class FinancialDataService {
    * console.log(`Found ${assets.length} assets`);
    * ```
    */
-  getAssetsByUserId = async (userId: string):Promise<Asset[]> => {
-    return this.prisma.asset.findMany({
+  getAssetsByUserId = async (userId: string): Promise<Partial<Asset[]>> => {
+    const data = await this.prisma.asset.findMany({
       where: { user_id: userId },
-    });
-  };
+      select: {
+        // ✅ Core Identity
+        id: true,
+        user_id: true,
+        name: true,
 
+        // ✅ Classification
+        type: true,
+        sub_type: true,
 
-  /***
-   * Get specific asset by ID for a user
-   * @param {string} assetId - Asset ID to fetch
-   * @param {string} userId - User ID who owns the asset
-   * @return {Promise<Asset[] | null>} Asset record or null if not found
-   * @example
-   * ```
-   * const asset = await service.getAssetById('asset-456', 'user-123');
-   * if (asset) {
-   *  console.log(`Asset Name: ${asset.name}`);
-   * } else {
-   * console.log('Asset not found');
-   * }
-   * ```
-   */
-  getAssetById = async (assetId: string, userId: string):Promise<Asset[]> => {
-    return await (this.prisma.asset.findMany({
-      where: { id: assetId, user_id: userId },
-    }));
+        // ✅ Bank/Financial Account Details
+        account_number: true,
+        ifsc_code: true,
+        branch_name: true,
+        bank_name: true,
+
+        // ✅ Financial Values
+        balance: true,
+        total_value: true,
+
+        // ✅ Status & Tracking
+        status: true,
+        last_updated: true,
+
+        // ✅ Address & Location
+        address: true,
+
+        // ✅ Nominee/Beneficiary Details
+        nominee: true,
+
+        // ✅ Insurance/Investment Specific Fields
+        policy_number: true,
+        fund_name: true,
+        folio_number: true,
+
+        // ✅ References
+        transaction_id: true,
+        email_id: true,
+
+        // ✅ Issues
+        issues: true,
+
+        // ✅ Timestamps
+        created_at: true,
+        updated_at: true,
+
+        // ❌ EXCLUDED - Document/Attachment Fields
+        document_type: false,
+        document_metadata: false,
+        file_name: false,
+        file_size: false,
+        mime_type: false,
+        file_content: false,
+      },
+    }) as Partial<Asset[]>;
+
+    return data
   };
 
 
   /**
-   * Approve an asset by updating its status
-   * @param {string} assetId - Asset ID to approve
-   * @param {string} userId - User ID who owns the asset
-   * @param {string} status - New status to set (e.g., 'approved')
-   * @return {Promise<{
-   *  updatedData: Asset;
-   * status: any;
-   * }>} Updated asset record
-   * @example
-   * ```
-   * const updatedAsset = await service.approveAsset('asset-456
-   * ', 'user-123');
-   * console.log(`Asset ${updatedAsset.id} approved`);
-   * ```
-   */
-  approveAsset = async (assetId: string, userId: string, status: string): Promise<{
-    updatedData: Asset;
+ * Get specific asset by ID for a user (excludes document-related fields)
+ * @param {string} assetId - Asset ID to fetch
+ * @param {string} userId - User ID who owns the asset
+ * @return {Promise<Partial<Asset> | null>} Asset record without document fields or null if not found
+ * @example
+ * ```
+ * const asset = await service.getAssetById('asset-456', 'user-123');
+ * if (asset) {
+ *   console.log(`Asset Name: ${asset.name}`);
+ *   // document_type, document_metadata, file_name, file_size, mime_type, file_content are excluded
+ * } else {
+ *   console.log('Asset not found');
+ * }
+ * ```
+ */
+  getAssetById = async (
+    assetId: string,
+    userId: string
+  ): Promise<Partial<Asset> | null> => {
+    const asset = await this.prisma.asset.findFirst({
+      where: { id: assetId, user_id: userId },
+      select: {
+        // ✅ Core Identity
+        id: true,
+        user_id: true,
+        name: true,
+
+        // ✅ Classification
+        type: true,
+        sub_type: true,
+
+        // ✅ Bank/Financial Account Details
+        account_number: true,
+        ifsc_code: true,
+        branch_name: true,
+        bank_name: true,
+
+        // ✅ Financial Values
+        balance: true,
+        total_value: true,
+
+        // ✅ Status & Tracking
+        status: true,
+        last_updated: true,
+
+        // ✅ Address & Location
+        address: true,
+
+        // ✅ Nominee/Beneficiary Details
+        nominee: true,
+
+        // ✅ Insurance/Investment Specific Fields
+        policy_number: true,
+        fund_name: true,
+        folio_number: true,
+
+        // ✅ References
+        transaction_id: true,
+        email_id: true,
+
+        // ✅ Issues
+        issues: true,
+
+        // ✅ Timestamps
+        created_at: true,
+        updated_at: true,
+
+        // ❌ EXCLUDED - Document/Attachment Fields
+        document_type: false,
+        document_metadata: false,
+        file_name: false,
+        file_size: false,
+        mime_type: false,
+        file_content: false,
+      },
+    });
+
+    return asset;
+  };
+
+
+  /**
+  * Approve an asset by updating its status (returns asset without document fields)
+  * @param {string} assetId - Asset ID to approve
+  * @param {string} userId - User ID who owns the asset
+  * @param {string} status - New status to set (e.g., 'active', 'approved')
+  * @return {Promise<{
+  *   updatedData: Partial<Asset>;
+  *   status: any;
+  * }>} Updated asset record without document fields
+  * @example
+  * ```
+  * const result = await service.approveAsset('asset-456', 'user-123', 'active');
+  * console.log(`Asset ${result.updatedData.id} approved`);
+  * // Document fields are excluded from response
+  * ```
+  */
+  approveAsset = async (
+    assetId: string,
+    userId: string,
+    status: string
+  ): Promise<{
+    updatedData: Partial<Asset>;
     status: any;
   }> => {
     const Status = await this.prisma.asset.updateMany({
@@ -152,46 +271,193 @@ export class FinancialDataService {
       data: { status: status || "needs_attention" },
     });
 
+    const updatedAsset = await this.prisma.asset.findUnique({
+      where: { id: assetId },
+      select: {
+        // ✅ Core Identity
+        id: true,
+        user_id: true,
+        name: true,
+
+        // ✅ Classification
+        type: true,
+        sub_type: true,
+
+        // ✅ Bank/Financial Account Details
+        account_number: true,
+        ifsc_code: true,
+        branch_name: true,
+        bank_name: true,
+
+        // ✅ Financial Values
+        balance: true,
+        total_value: true,
+
+        // ✅ Status & Tracking
+        status: true,
+        last_updated: true,
+
+        // ✅ Address & Location
+        address: true,
+
+        // ✅ Nominee/Beneficiary Details
+        nominee: true,
+
+        // ✅ Insurance/Investment Specific Fields
+        policy_number: true,
+        fund_name: true,
+        folio_number: true,
+
+        // ✅ References
+        transaction_id: true,
+        email_id: true,
+
+        // ✅ Issues
+        issues: true,
+
+        // ✅ Timestamps
+        created_at: true,
+        updated_at: true,
+
+        // ❌ EXCLUDED - Document/Attachment Fields
+        document_type: false,
+        document_metadata: false,
+        file_name: false,
+        file_size: false,
+        mime_type: false,
+        file_content: false,
+      },
+    });
 
     return {
-      updatedData:
-        await (this.prisma.asset.findUnique({
-          where: { id: assetId },
-        }) as Promise<Asset>),
+      updatedData: updatedAsset!,
       status: Status,
-    }
+    };
   };
 
 
   /**
-   * Edit the details of an existing asset
+   * Edit the details of an existing asset (excludes document-related fields from updates)
    * @param {string} assetId - ID of the asset to edit
    * @param {string} userId - ID of the user who owns the asset
    * @param {Partial<Asset>} updates - Object containing fields to update
-   * @return {Promise<Asset>} - The updated asset record
+   * @return {Promise<Partial<Asset>>} - The updated asset record (without document fields)
    * @example
    * ```
-   * const updatedAsset = await service.editAsset('asset-456', 'user-123', {
+   * const updatedAsset = await service.updateAsset('asset-456', 'user-123', {
    *   name: 'Updated Asset Name',
-   *  balance: 15000.00,
+   *   balance: 15000.00,
    * });
    * console.log(`Asset ${updatedAsset.id} updated`);
+   * // document_type, file_name, etc. are not returned
    * ```
    * @throws {Error} If the asset is not found or the user is unauthorized
-   * 
    */
-  updateAsset = async (assetId: string, userId: string, updates: Partial<any>): Promise<Asset> => {
+  updateAsset = async (
+    assetId: string,
+    userId: string,
+    updates: Partial<any>
+  ): Promise<Partial<Asset>> => {
     const asset = await this.prisma.asset.findUnique({
       where: { id: assetId },
     });
+
     if (!asset || asset.user_id !== userId) {
       throw new Error('Asset not found or unauthorized');
     }
-    return this.prisma.asset.update({
+
+    // 🧩 Define allowed fields for update (EXCLUDING document fields)
+    const allowedFields = [
+      "name",
+      "type",
+      "sub_type",
+      "account_number",
+      "ifsc_code",
+      "branch_name",
+      "bank_name",
+      "balance",
+      "total_value",
+      "status",
+      "address",
+      "nominee",
+      "policy_number",
+      "fund_name",
+      "folio_number",
+      "issues",
+      // ❌ EXCLUDED: document_type, document_metadata, file_name, file_size, mime_type, file_content
+    ];
+
+    // ✅ Filter out unwanted fields
+    const safeUpdates: Record<string, any> = {};
+    for (const key of allowedFields) {
+      if (updates[key] !== undefined) {
+        safeUpdates[key] = updates[key];
+      }
+    }
+
+    // 🛠 Update only allowed fields and return without document fields
+    const updatedAsset = await this.prisma.asset.update({
       where: { id: assetId },
-      data: updates,
+      data: safeUpdates,
+      select: {
+        // ✅ Core Identity
+        id: true,
+        user_id: true,
+        name: true,
+
+        // ✅ Classification
+        type: true,
+        sub_type: true,
+
+        // ✅ Bank/Financial Account Details
+        account_number: true,
+        ifsc_code: true,
+        branch_name: true,
+        bank_name: true,
+
+        // ✅ Financial Values
+        balance: true,
+        total_value: true,
+
+        // ✅ Status & Tracking
+        status: true,
+        last_updated: true,
+
+        // ✅ Address & Location
+        address: true,
+
+        // ✅ Nominee/Beneficiary Details
+        nominee: true,
+
+        // ✅ Insurance/Investment Specific Fields
+        policy_number: true,
+        fund_name: true,
+        folio_number: true,
+
+        // ✅ References
+        transaction_id: true,
+        email_id: true,
+
+        // ✅ Issues
+        issues: true,
+
+        // ✅ Timestamps
+        created_at: true,
+        updated_at: true,
+
+        // ❌ EXCLUDED - Document/Attachment Fields
+        document_type: false,
+        document_metadata: false,
+        file_name: false,
+        file_size: false,
+        mime_type: false,
+        file_content: false,
+      },
     });
+
+    return updatedAsset;
   };
+
 
 
 
@@ -287,6 +553,8 @@ export class FinancialDataService {
 
           const extracted = emailAnalysis.extractedData;
 
+          // console.log(`Extracted Data :: ${JSON.stringify(extracted)}`)
+
           // Save to Asset with ALL new fields
           const assetRecord = await this.prisma.asset.create({
             data: {
@@ -308,15 +576,19 @@ export class FinancialDataService {
                 ? parseFloat(String(extracted.amount))
                 : extracted.financialMetadata?.currentValue
                   ? parseFloat(String(extracted.financialMetadata.currentValue))
-                  : null,
+                  : emailAnalysis.extractedData.amount
+                    ? parseFloat(String(emailAnalysis.extractedData.amount))
+                    : null,
 
               total_value: extracted.financialMetadata?.totalValue
                 ? parseFloat(String(extracted.financialMetadata.totalValue))
-                : null,
+                : emailAnalysis.extractedData.amount
+                  ? parseFloat(String(emailAnalysis.extractedData.amount))
+                  : null,
 
               // 📊 Status
               // status: extracted.status || 'active', // Deprecated
-              status: 'pending',
+              status: 'inactive',
               last_updated: new Date(),
 
               // 💳 Insurance/Investment Fields
@@ -364,6 +636,7 @@ export class FinancialDataService {
               },
 
               email_id: emailData.emailId,
+              issues: emailAnalysis.issues || [],
             },
           });
           assetIds.push(assetRecord.id);

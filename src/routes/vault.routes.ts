@@ -62,7 +62,7 @@ const vaultRoutes = Router();
  *   "success": true,
  *   "data": [
  *     { "id": "asset1", "name": "Property", "status": "active", "value": 100000 },
- *     { "id": "asset2", "name": "Vehicle", "status": "pending", "value": 50000 }
+ *     { "id": "asset2", "name": "Vehicle", "status": "inactive", "value": 50000 }
  *   ]
  * }
  */
@@ -72,7 +72,18 @@ vaultRoutes.get(
     async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
         try {
             const assets = await financialDataService.getAssetsByUserId(req.user?.userId!);
-            return res.status(200).json({ success: true, data: assets });
+
+            // Add extra fields to each asset
+            const enrichedAssets = assets.map(asset => ({
+                ...asset,
+                source: "AI",
+                submitted: true,
+            }));
+
+            return res.status(200).json({
+                success: true,
+                data: enrichedAssets
+            });
         } catch (error) {
             console.error('Error fetching assets:', error);
             return res.status(500).json({
@@ -83,6 +94,7 @@ vaultRoutes.get(
         }
     }
 );
+
 
 /**
  * GET /get-asset/:assetId
@@ -165,7 +177,7 @@ vaultRoutes.get(
  * 
  * @description
  * Allowed status values:
- * - active, inactive, pending, approved, rejected
+ * - active, inactive, inactive, approved, rejected
  * - under_review, needs_attention, verified, unverified
  * - flagged, escalated, resolved, closed, open
  * - in_progress, on_hold, completed, canceled
@@ -178,28 +190,28 @@ vaultRoutes.patch(
         try {
             const assetId = req.params.assetId;
             const { status } = req.body;
-            
+
             // Allowed asset statuses
             const allowedStatus = [
-                'active', 'inactive', 'pending', 'approved', 'rejected', 
-                'under_review', 'needs_attention', 'verified', 'unverified', 
-                'flagged', 'escalated', 'resolved', 'closed', 'open', 
-                'in_progress', 'on_hold', 'completed', 'canceled', 
+                'active', 'inactive', 'inactive', 'approved', 'rejected',
+                'under_review', 'needs_attention', 'verified', 'unverified',
+                'flagged', 'escalated', 'resolved', 'closed', 'open',
+                'in_progress', 'on_hold', 'completed', 'canceled',
                 'draft', 'submitted', 'processing'
             ];
-            
+
             // Validate status input
             if (!allowedStatus.includes(status)) {
                 return res.status(400).json({
-                    success: false, 
+                    success: false,
                     message: 'Invalid status value',
                     allowedStatus
                 });
             }
-            
+
             const approvedAsset = await financialDataService.approveAsset(
-                assetId, 
-                req.user?.userId!, 
+                assetId,
+                req.user?.userId!,
                 status
             );
             return res.status(200).json({ success: true, data: approvedAsset });
@@ -260,8 +272,8 @@ vaultRoutes.put(
             const assetId = req.params.assetId;
             const assetData = req.body;
             const updatedAsset = await financialDataService.updateAsset(
-                assetId, 
-                req.user?.userId!, 
+                assetId,
+                req.user?.userId!,
                 assetData
             );
             return res.status(200).json({ success: true, data: updatedAsset });

@@ -96,6 +96,7 @@ interface AnalysisResult {
   };
   keyPoints?: string[];
   summary?: string;
+  issues: string[]
 }
 
 export class AIService {
@@ -211,194 +212,194 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
   /**
  * Enhanced local filtering for marketing and non-financial emails
  */
-private isMarketingOrCasualEmail(emailData: EmailMessage): boolean {
-  const subject = (emailData.subject || '').toLowerCase();
-  const body = (emailData.preview || '').toLowerCase();
-  const sender = (emailData.from || '').toLowerCase();
+  private isMarketingOrCasualEmail(emailData: EmailMessage): boolean {
+    const subject = (emailData.subject || '').toLowerCase();
+    const body = (emailData.preview || '').toLowerCase();
+    const sender = (emailData.from || '').toLowerCase();
 
-  // === MARKETING/PLATFORM EMAILS ===
-  const marketingPatterns = [
-    // Cloud platforms & deployment services
-    'vercel', 'render', 'fylo', 'aws', 'azure', 'heroku', 'railway',
-    'netlify', 'firebase', 'digital ocean', 'linode', 'vultr',
-    
-    // Payment & financial services platforms (not bank/actual financial)
-    'stripe', 'razorpay', 'paypal billing', 'square',
-    'twilio', 'sendgrid', 'mailgun',
-    
-    // SaaS & subscription services
-    'upgrade to', 'plan', 'pricing', 'discount', 'offer', 'promotion',
-    'limited offer', 'save now', 'get started', 'try for free',
-    'special deal', 'exclusive offer', 'claim your',
-    'activate', 'welcome to', 'get up and running',
-    '30 days free', 'free trial', 'standard support',
-    
-    // Generic marketing
-    'activate', 'welcome aboard', 'help you get started',
-    'scaling', 'cloud platform', 'deploy faster'
-  ];
+    // === MARKETING/PLATFORM EMAILS ===
+    const marketingPatterns = [
+      // Cloud platforms & deployment services
+      'vercel', 'render', 'fylo', 'aws', 'azure', 'heroku', 'railway',
+      'netlify', 'firebase', 'digital ocean', 'linode', 'vultr',
 
-  // === SMALL/CASUAL TRANSACTIONS ===
-  const casualTransactionPatterns = [
-    // Digital wallets & casual payments
-    'upi', 'wallet', 'recharge', 'paytm', 'gpay', 'phonepay',
-    'small transfer', 'money transfer', 'quick payment',
-    'app recharge', 'subscription charged',
-    'amazon pay', 'airtel payments',
-    
-    // Food & delivery
-    'food delivery', 'uber eats', 'zomato', 'swiggy',
-    'doordash', 'grubhub', 'order delivered',
-    
-    // Ride sharing & casual services
-    'uber', 'ola', 'lyft', 'taxi',
-    
-    // Entertainment & casual
-    'streaming', 'netflix', 'spotify', 'youtube',
-    'movie ticket', 'bookMyShow',
-    
-    // Small shopping
-    'order confirmed', 'shipment', 'delivery', 'tracking',
-    'amazon', 'flipkart', 'ebay'
-  ];
+      // Payment & financial services platforms (not bank/actual financial)
+      'stripe', 'razorpay', 'paypal billing', 'square',
+      'twilio', 'sendgrid', 'mailgun',
 
-  // Check marketing patterns
-  for (const pattern of marketingPatterns) {
-    if (subject.includes(pattern) || body.includes(pattern)) {
-      console.log(`🔥 Filtered (Marketing): ${subject}`);
-      return true;
-    }
-  }
+      // SaaS & subscription services
+      'upgrade to', 'plan', 'pricing', 'discount', 'offer', 'promotion',
+      'limited offer', 'save now', 'get started', 'try for free',
+      'special deal', 'exclusive offer', 'claim your',
+      'activate', 'welcome to', 'get up and running',
+      '30 days free', 'free trial', 'standard support',
 
-  // Check casual transaction patterns
-  for (const pattern of casualTransactionPatterns) {
-    if (subject.includes(pattern) || body.includes(pattern)) {
-      console.log(`💳 Filtered (Casual): ${subject}`);
-      return true;
-    }
-  }
+      // Generic marketing
+      'activate', 'welcome aboard', 'help you get started',
+      'scaling', 'cloud platform', 'deploy faster'
+    ];
 
-  return false;
-}
+    // === SMALL/CASUAL TRANSACTIONS ===
+    const casualTransactionPatterns = [
+      // Digital wallets & casual payments
+      'upi', 'wallet', 'recharge', 'paytm', 'gpay', 'phonepay',
+      'small transfer', 'money transfer', 'quick payment',
+      'app recharge', 'subscription charged',
+      'amazon pay', 'airtel payments',
 
-/**
- * Check if email is MAJOR financial only
- */
-private isMajorFinancialEmail(emailData: EmailMessage): boolean {
-  const subject = (emailData.subject || '').toLowerCase();
-  const body = (emailData.preview || '').toLowerCase();
+      // Food & delivery
+      'food delivery', 'uber eats', 'zomato', 'swiggy',
+      'doordash', 'grubhub', 'order delivered',
 
-  // === MAJOR FINANCIAL ONLY ===
-  const majorFinancialPatterns = [
-    // Bank statements
-    'statement', 'account summary', 'bank account',
-    
-    // Credit cards (actual statements, not small purchases)
-    'credit card statement', 'card statement', 'cc statement',
-    'outstanding balance', 'credit limit',
-    
-    // Loans
-    'loan statement', 'loan emi', 'home loan', 'car loan',
-    'personal loan', 'education loan', 'business loan',
-    'emi due', 'loan disbursement', 'loan approval',
-    
-    // Insurance
-    'policy statement', 'insurance premium', 'policy renewal',
-    'life insurance', 'health insurance', 'insurance claim',
-    'coverage', 'sum assured', 'maturity',
-    
-    // Investments & mutual funds
-    'mutual fund', 'mf statement', 'portfolio statement',
-    'investment statement', 'stock statement',
-    'sip', 'nps statement', 'ppf',
-    'dividend', 'dividend reinvestment',
-    
-    // Income & tax
-    'salary slip', 'payslip', 'income certificate',
-    'tax return', 'form 16', 'itr', '1099', 'w2',
-    'tds', 'tax', 'income tax',
-    
-    // Major transactions & assets
-    'property purchase', 'real estate', 'deed',
-    'business registration', 'company formation',
-    'cryptocurrency', 'digital asset',
-    
-    // Financial statements
-    'balance sheet', 'p&l', 'profit loss',
-    'financial statement', 'annual report',
-    
-    // Bank notifications (critical only)
-    'fund transfer', 'large withdrawal', 'account alert',
-    'suspicious activity', 'security alert'
-  ];
+      // Ride sharing & casual services
+      'uber', 'ola', 'lyft', 'taxi',
 
-  for (const pattern of majorFinancialPatterns) {
-    if (subject.includes(pattern) || body.includes(pattern)) {
-      return true;
-    }
-  }
+      // Entertainment & casual
+      'streaming', 'netflix', 'spotify', 'youtube',
+      'movie ticket', 'bookMyShow',
 
-  return false;
-}
+      // Small shopping
+      'order confirmed', 'shipment', 'delivery', 'tracking',
+      'amazon', 'flipkart', 'ebay'
+    ];
 
-/**
- * Classify with multiple layers of filtering
- */
-async classifyEmailSubjectsWithFiltering(
-  emailDataArray: EmailMessage[]
-): Promise<string[]> {
-  try {
-    console.log(`🔍 Starting classification for ${emailDataArray.length} emails...\n`);
-
-    // Step 1: Local pre-filtering (remove obvious marketing/casual)
-    const afterLocalFilter = emailDataArray.filter(email => {
-      const isMarketing = this.isMarketingOrCasualEmail(email);
-      if (isMarketing) {
-        console.log(`  ❌ Filtered (${email.from}): "${email.subject}"`);
+    // Check marketing patterns
+    for (const pattern of marketingPatterns) {
+      if (subject.includes(pattern) || body.includes(pattern)) {
+        console.log(`🔥 Filtered (Marketing): ${subject}`);
+        return true;
       }
-      return !isMarketing;
-    });
+    }
 
-    console.log(
-      `\n📊 After local filter: ${emailDataArray.length} → ${afterLocalFilter.length}\n`
-    );
+    // Check casual transaction patterns
+    for (const pattern of casualTransactionPatterns) {
+      if (subject.includes(pattern) || body.includes(pattern)) {
+        console.log(`💳 Filtered (Casual): ${subject}`);
+        return true;
+      }
+    }
 
-    if (afterLocalFilter.length === 0) {
-      console.log('⚠️ All emails filtered as marketing/casual');
+    return false;
+  }
+
+  /**
+   * Check if email is MAJOR financial only
+   */
+  private isMajorFinancialEmail(emailData: EmailMessage): boolean {
+    const subject = (emailData.subject || '').toLowerCase();
+    const body = (emailData.preview || '').toLowerCase();
+
+    // === MAJOR FINANCIAL ONLY ===
+    const majorFinancialPatterns = [
+      // Bank statements
+      'statement', 'account summary', 'bank account',
+
+      // Credit cards (actual statements, not small purchases)
+      'credit card statement', 'card statement', 'cc statement',
+      'outstanding balance', 'credit limit',
+
+      // Loans
+      'loan statement', 'loan emi', 'home loan', 'car loan',
+      'personal loan', 'education loan', 'business loan',
+      'emi due', 'loan disbursement', 'loan approval',
+
+      // Insurance
+      'policy statement', 'insurance premium', 'policy renewal',
+      'life insurance', 'health insurance', 'insurance claim',
+      'coverage', 'sum assured', 'maturity',
+
+      // Investments & mutual funds
+      'mutual fund', 'mf statement', 'portfolio statement',
+      'investment statement', 'stock statement',
+      'sip', 'nps statement', 'ppf',
+      'dividend', 'dividend reinvestment',
+
+      // Income & tax
+      'salary slip', 'payslip', 'income certificate',
+      'tax return', 'form 16', 'itr', '1099', 'w2',
+      'tds', 'tax', 'income tax',
+
+      // Major transactions & assets
+      'property purchase', 'real estate', 'deed',
+      'business registration', 'company formation',
+      'cryptocurrency', 'digital asset',
+
+      // Financial statements
+      'balance sheet', 'p&l', 'profit loss',
+      'financial statement', 'annual report',
+
+      // Bank notifications (critical only)
+      'fund transfer', 'large withdrawal', 'account alert',
+      'suspicious activity', 'security alert'
+    ];
+
+    for (const pattern of majorFinancialPatterns) {
+      if (subject.includes(pattern) || body.includes(pattern)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Classify with multiple layers of filtering
+   */
+  async classifyEmailSubjectsWithFiltering(
+    emailDataArray: EmailMessage[]
+  ): Promise<string[]> {
+    try {
+      console.log(`🔍 Starting classification for ${emailDataArray.length} emails...\n`);
+
+      // Step 1: Local pre-filtering (remove obvious marketing/casual)
+      const afterLocalFilter = emailDataArray.filter(email => {
+        const isMarketing = this.isMarketingOrCasualEmail(email);
+        if (isMarketing) {
+          console.log(`  ❌ Filtered (${email.from}): "${email.subject}"`);
+        }
+        return !isMarketing;
+      });
+
+      console.log(
+        `\n📊 After local filter: ${emailDataArray.length} → ${afterLocalFilter.length}\n`
+      );
+
+      if (afterLocalFilter.length === 0) {
+        console.log('⚠️ All emails filtered as marketing/casual');
+        return [];
+      }
+
+      // Step 2: Check if remaining emails are major financial
+      const majorFinancialEmails = afterLocalFilter.filter(email => {
+        const isMajor = this.isMajorFinancialEmail(email);
+        if (isMajor) {
+          console.log(`  ✅ Major Financial: "${email.subject}"`);
+        }
+        return isMajor;
+      });
+
+      console.log(
+        `\n💰 Major financial emails: ${majorFinancialEmails.length}\n`
+      );
+
+      if (majorFinancialEmails.length === 0) {
+        console.log('⚠️ No major financial emails found');
+        return [];
+      }
+
+      // Step 3: AI classification for final confirmation (optional, for edge cases)
+      const aiConfirmed = await this.classifyEmailSubjects(majorFinancialEmails);
+
+      console.log(
+        `✅ Final after AI filtering: ${aiConfirmed.length} emails\n`
+      );
+
+      return aiConfirmed;
+    } catch (error) {
+      console.error('❌ Error in filtered classification:', error);
       return [];
     }
-
-    // Step 2: Check if remaining emails are major financial
-    const majorFinancialEmails = afterLocalFilter.filter(email => {
-      const isMajor = this.isMajorFinancialEmail(email);
-      if (isMajor) {
-        console.log(`  ✅ Major Financial: "${email.subject}"`);
-      }
-      return isMajor;
-    });
-
-    console.log(
-      `\n💰 Major financial emails: ${majorFinancialEmails.length}\n`
-    );
-
-    if (majorFinancialEmails.length === 0) {
-      console.log('⚠️ No major financial emails found');
-      return [];
-    }
-
-    // Step 3: AI classification for final confirmation (optional, for edge cases)
-    const aiConfirmed = await this.classifyEmailSubjects(majorFinancialEmails);
-
-    console.log(
-      `✅ Final after AI filtering: ${aiConfirmed.length} emails\n`
-    );
-
-    return aiConfirmed;
-  } catch (error) {
-    console.error('❌ Error in filtered classification:', error);
-    return [];
   }
-}
 
   /**
    * Safe wrapper for classification with local filtering
@@ -496,7 +497,6 @@ CLASSIFICATION RULES:
 📋 STATUS VALUES:
 - active: Currently active/running
 - inactive: Closed/matured/completed
-- pending: Awaiting activation/processing
 - complete: Fully paid/matured
 - missing: Information incomplete
 
@@ -514,7 +514,7 @@ CLASSIFICATION RULES:
   "assetCategory": "asset|liability|insurance",
   "assetType": "detailed type from above list",
   "assetSubType": "more specific classification if applicable",
-  "status": "active|inactive|pending|complete|missing",
+  "status": "active|inactive|complete|missing",
   
   "bankName": "bank/institution name",
   "ifscCode": "IFSC code if available",
@@ -713,24 +713,31 @@ Now analyze the provided email and return structured JSON:`;
       }
 
       const extracted: EnhancedFinancialData = JSON.parse(jsonMatch[0]);
+      const issues = await this.validateExtractedData(extracted, data.attachmentContents);;
+
+      if (issues.length > 0) {
+        console.log('⚠️ Validation Issues Found:', issues);
+      } else {
+        console.log('✅ No validation issues detected');
+      }
 
       return {
         success: true,
         extractedData: {
           // Basic transaction data
           transactionType: extracted.transactionType || 'other',
-          amount: extracted.amount,
+          // amount: extracted.amount,
           currency: extracted.currency || 'INR',
           merchant: extracted.merchant,
           description: extracted.description,
           date: extracted.date,
-          accountNumber: extracted.accountNumber,
+          accountNumber: extracted.accountNumber!,
           confidence: extracted.confidence || 50,
 
           // Enhanced classification
-          assetCategory: extracted.assetCategory,
-          assetType: extracted.assetType,
-          assetSubType: extracted.assetSubType,
+          assetCategory: (extracted.assetCategory as any),
+          assetType: extracted.assetType!,
+          assetSubType: extracted.assetSubType!,
           status: extracted.status || 'active',
 
           // Bank details
@@ -745,16 +752,559 @@ Now analyze the provided email and return structured JSON:`;
 
           // Complete metadata
           financialMetadata: extracted.financialMetadata || {},
+          balance: extracted.financialMetadata?.currentValue ||
+            extracted.financialMetadata?.outstandingBalance ||
+            extracted.amount, // fallback
+          total_value: extracted.financialMetadata?.totalValue ||
+            extracted.financialMetadata?.coverageAmount ||
+            extracted.amount, // fallback
         },
         keyPoints: extracted.keyPoints || [],
         summary: this.generateSmartSummary(extracted),
         attachmentAnalyses,
+        issues
       };
     } catch (error) {
       console.error('Error analyzing financial email:', error);
       return this.fallbackFinancialAnalysis(data);
     }
   }
+
+
+  /**
+ * Validates extracted financial data and returns list of issues
+ */
+  /**
+ * AI-powered file content analysis for detecting document-level issues
+ */
+  private async analyzeFileContentIssues(
+    fileContent: string,
+    fileName: string,
+    mimeType: string
+  ): Promise<string[]> {
+    const contentIssues: string[] = [];
+
+    try {
+      // Check for common error indicators in content [web:11][web:18]
+      const errorPatterns = {
+        passwordProtected: [
+          'password',
+          'encrypted',
+          'protected',
+          'incorrect password',
+          'enter password',
+          'password required',
+          'authentication required',
+          'user password',
+          'owner password',
+        ],
+        corruptFile: [
+          'corrupt',
+          'damaged',
+          'incomplete',
+          'invalid file',
+          'file error',
+          'parsing error',
+          'cannot read',
+          'unreadable',
+          'broken',
+          'malformed',
+        ],
+        ocrErrors: [
+          'poor quality',
+          'low resolution',
+          'blurry',
+          'unrecognizable',
+          'extraction failed',
+          'ocr error',
+          'cannot extract text',
+        ],
+        permissionErrors: [
+          'access denied',
+          'permission denied',
+          'not allowed',
+          'restricted',
+          'printing not available',
+          'copying disabled',
+        ],
+      };
+
+      const contentLower = fileContent.toLowerCase();
+
+      // Pattern matching for common errors [web:11][web:15][web:18]
+      for (const [category, patterns] of Object.entries(errorPatterns)) {
+        for (const pattern of patterns) {
+          if (contentLower.includes(pattern.toLowerCase())) {
+            switch (category) {
+              case 'passwordProtected':
+                contentIssues.push('File is password protected or encrypted');
+                break;
+              case 'corruptFile':
+                contentIssues.push('File appears to be corrupt or incomplete');
+                break;
+              case 'ocrErrors':
+                contentIssues.push('OCR extraction quality is poor or failed');
+                break;
+              case 'permissionErrors':
+                contentIssues.push('File has permission restrictions');
+                break;
+            }
+            break;
+          }
+        }
+      }
+
+      // Check content length [web:16]
+      if (fileContent.length < 50) {
+        contentIssues.push('File content is too short - possible extraction failure');
+      }
+
+      // Check for gibberish/binary content [web:19]
+      const nonPrintableChars = fileContent.match(/[^\x20-\x7E\n\r\t]/g);
+      if (nonPrintableChars && nonPrintableChars.length > fileContent.length * 0.3) {
+        contentIssues.push('File contains excessive binary/non-readable characters');
+      }
+
+      // AI-powered content analysis [web:21][web:24][web:25]
+      const aiContentPrompt = `You are a document quality analyzer. Analyze this file content and detect ALL issues.
+
+File Name: ${fileName}
+MIME Type: ${mimeType}
+Content Preview: ${fileContent.substring(0, 2000)}
+
+🔍 DETECT AND RETURN ALL ISSUES AS JSON ARRAY:
+
+Common issues to check [web:16][web:19][web:28]:
+1. Password protected/encrypted files
+2. Corrupt or incomplete files
+3. Poor OCR quality (blurry, unreadable text)
+4. Parsing errors
+5. Permission/access restrictions
+6. Invalid file format
+7. Missing critical data
+8. Garbled/corrupted text
+9. Incomplete extraction
+10. File size issues
+11. Format conversion errors
+12. Character encoding problems
+13. Scanned document quality issues (skew, noise, dark/light)
+14. Handwriting recognition failures
+15. Table extraction errors
+16. Missing pages or sections
+17. Watermark interference
+18. Image quality issues in scanned PDFs
+19. Date parsing failures
+20. Currency symbol errors
+21. Special character misinterpretation
+22. Multiple languages mixing
+23. Header/footer extraction issues
+24. Signature/stamp recognition problems
+25. Barcode/QR code reading failures
+
+Return ONLY a JSON array of detected issues:
+{
+  "issues": [
+    "Issue description 1",
+    "Issue description 2"
+  ]
+}
+
+If NO issues found, return: {"issues": []}
+`;
+
+      const aiResponse = await this.callOpenAI(aiContentPrompt);
+      const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
+
+      if (jsonMatch) {
+        const aiResult = JSON.parse(jsonMatch[0]);
+        if (aiResult.issues && Array.isArray(aiResult.issues)) {
+          contentIssues.push(...aiResult.issues);
+        }
+      }
+
+      // Remove duplicates
+      return [...new Set(contentIssues)];
+    } catch (error) {
+      console.error('Error analyzing file content:', error);
+      contentIssues.push('Failed to analyze file content quality');
+      return contentIssues;
+    }
+  }
+
+  /**
+   * Complete validation with file content analysis
+   */
+  private async validateExtractedData(
+    extracted: EnhancedFinancialData,
+    attachmentContents?: Array<{ filename: string; mimeType: string; content: string; size: number }>
+  ): Promise<string[]> {
+    const issues: string[] = [];
+
+    // =====================================
+    // 1. CONFIDENCE SCORE CHECK
+    // =====================================
+    if (extracted.confidence < 60) {
+      issues.push(`Low confidence score: ${extracted.confidence}%`);
+    } else if (extracted.confidence < 80) {
+      issues.push(`Medium confidence score: ${extracted.confidence}% - Manual review recommended`);
+    }
+
+    // =====================================
+    // 2. MISSING CRITICAL FIELDS
+    // =====================================
+    if (!extracted.assetCategory) {
+      issues.push('Missing asset category (asset/liability/insurance)');
+    }
+    if (!extracted.assetType) {
+      issues.push('Missing asset type classification');
+    }
+    if (!extracted.merchant && !extracted.bankName) {
+      issues.push('Missing merchant/bank name');
+    }
+
+    // =====================================
+    // 3. AMOUNT/VALUE VALIDATION
+    // =====================================
+    if (
+      !extracted.amount &&
+      !extracted.financialMetadata?.currentValue &&
+      !extracted.financialMetadata?.totalValue
+    ) {
+      issues.push('No financial amount or value found');
+    }
+    if (extracted.amount && extracted.amount < 0) {
+      issues.push('Negative amount detected - verify transaction type');
+    }
+    if (extracted.financialMetadata?.totalValue && extracted.financialMetadata?.currentValue) {
+      if (extracted.financialMetadata.totalValue < extracted.financialMetadata.currentValue) {
+        issues.push('Total value less than current value - possible data inconsistency');
+      }
+    }
+
+    // Large amount validation
+    if (extracted.amount && extracted.amount > 10000000) {
+      // 1 crore+
+      issues.push(`Unusually large amount: ${extracted.amount} - verify accuracy`);
+    }
+
+    // =====================================
+    // 4. DATE VALIDATION [web:1]
+    // =====================================
+    if (extracted.date) {
+      const extractedDate = new Date(extracted.date);
+      const currentDate = new Date();
+      const oneYearAgo = new Date();
+      oneYearAgo.setFullYear(currentDate.getFullYear() - 1);
+      const fiveYearsAgo = new Date();
+      fiveYearsAgo.setFullYear(currentDate.getFullYear() - 5);
+
+      if (isNaN(extractedDate.getTime())) {
+        issues.push('Invalid date format');
+      } else if (extractedDate > currentDate) {
+        issues.push('Future date detected - verify transaction date');
+      } else if (extractedDate < fiveYearsAgo) {
+        issues.push(`Very old transaction date: ${extracted.date} - verify if historical data`);
+      } else if (extractedDate < oneYearAgo) {
+        issues.push(`Old transaction date: ${extracted.date} - verify if accurate`);
+      }
+    } else {
+      issues.push('Missing transaction date');
+    }
+
+    // =====================================
+    // 5. BANK ACCOUNT VALIDATION [web:1]
+    // =====================================
+    if (extracted.accountNumber) {
+      const digitsOnly = extracted.accountNumber.replace(/[^0-9]/g, '');
+      // Indian bank account: 9-18 digits
+      if (!/^\d{9,18}$/.test(digitsOnly)) {
+        issues.push('Invalid account number format (expected 9-18 digits)');
+      }
+    }
+
+    if (extracted.ifscCode) {
+      // IFSC format: 4 letters + 0 + 6 alphanumeric (e.g., SBIN0001234) [web:1]
+      if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(extracted.ifscCode.toUpperCase())) {
+        issues.push('Invalid IFSC code format (expected: XXXX0XXXXXX)');
+      }
+    }
+
+    // =====================================
+    // 6. CATEGORY-SPECIFIC VALIDATION
+    // =====================================
+    if (extracted.assetCategory === 'liability') {
+      // Liabilities should have outstanding balance or EMI info
+      if (!extracted.financialMetadata?.outstandingBalance && !extracted.financialMetadata?.emiAmount) {
+        issues.push('Liability missing outstanding balance or EMI details');
+      }
+
+      // Credit card specific
+      if (extracted.assetType === 'credit_card') {
+        if (!extracted.financialMetadata?.creditLimit) {
+          issues.push('Credit card missing credit limit');
+        }
+        if (!extracted.financialMetadata?.minimumPayment) {
+          issues.push('Credit card missing minimum payment amount');
+        }
+        if (!extracted.financialMetadata?.dueDate) {
+          issues.push('Credit card missing payment due date');
+        }
+
+        // Credit utilization check
+        if (
+          extracted.financialMetadata?.outstandingBalance &&
+          extracted.financialMetadata?.creditLimit
+        ) {
+          const utilization =
+            (extracted.financialMetadata.outstandingBalance / extracted.financialMetadata.creditLimit) *
+            100;
+          if (utilization > 100) {
+            issues.push('Credit card over limit - verify outstanding balance');
+          } else if (utilization > 80) {
+            issues.push('High credit utilization (>80%) - consider payment');
+          }
+        }
+      }
+
+      // Loan specific
+      if (
+        extracted.assetType === 'home_loan' ||
+        extracted.assetType === 'vehicle_loan' ||
+        extracted.assetType === 'education_loan'
+      ) {
+        if (!extracted.financialMetadata?.interestRate) {
+          issues.push('Loan missing interest rate information');
+        }
+        if (!extracted.financialMetadata?.emiAmount) {
+          issues.push('Loan missing EMI amount');
+        }
+      }
+    }
+
+    if (extracted.assetCategory === 'insurance') {
+      // Insurance should have policy number [web:7]
+      if (!extracted.policyNumber) {
+        issues.push('Insurance policy missing policy number');
+      }
+
+      // Life insurance specific
+      if (extracted.assetType === 'life_insurance') {
+        if (!extracted.financialMetadata?.sumAssured && !extracted.financialMetadata?.coverageAmount) {
+          issues.push('Life insurance missing sum assured/coverage amount');
+        }
+        if (!extracted.financialMetadata?.premium) {
+          issues.push('Life insurance missing premium amount');
+        }
+        if (!extracted.financialMetadata?.maturityDate) {
+          issues.push('Life insurance missing maturity date');
+        }
+      }
+
+      // Health insurance specific
+      if (extracted.assetType === 'health_insurance') {
+        if (!extracted.financialMetadata?.coverageAmount) {
+          issues.push('Health insurance missing coverage amount');
+        }
+      }
+
+      // Premium validation
+      if (extracted.financialMetadata?.premium) {
+        if (extracted.financialMetadata.premium < 0) {
+          issues.push('Invalid negative premium amount');
+        }
+        if (!extracted.financialMetadata.premiumFrequency) {
+          issues.push('Insurance missing premium frequency (monthly/yearly)');
+        }
+      }
+    }
+
+    if (extracted.assetCategory === 'asset') {
+      // Investment specific
+      if (extracted.assetType === 'investment') {
+        if (extracted.assetSubType === 'mutual_fund' && !extracted.folioNumber) {
+          issues.push('Mutual fund missing folio number');
+        }
+        if (!extracted.financialMetadata?.currentValue) {
+          issues.push('Investment missing current value');
+        }
+
+        // Returns validation
+        if (
+          extracted.financialMetadata?.purchasePrice &&
+          extracted.financialMetadata?.currentValue
+        ) {
+          const returns =
+            ((extracted.financialMetadata.currentValue - extracted.financialMetadata.purchasePrice) /
+              extracted.financialMetadata.purchasePrice) *
+            100;
+          if (returns < -50) {
+            issues.push(`Significant loss detected: ${returns.toFixed(2)}% - verify values`);
+          }
+        }
+      }
+
+      // Liquid asset validation
+      if (extracted.assetSubType === 'liquid_asset') {
+        if (!extracted.balance && !extracted.financialMetadata?.currentValue) {
+          issues.push('Liquid asset missing balance/current value');
+        }
+      }
+    }
+
+    // =====================================
+    // 7. CURRENCY VALIDATION
+    // =====================================
+    const validCurrencies = ['INR', 'USD', 'EUR', 'GBP', 'AED', 'SGD', 'JPY', 'CHF', 'CAD', 'AUD'];
+    if (extracted.currency && !validCurrencies.includes(extracted.currency)) {
+      issues.push(`Unusual or invalid currency detected: ${extracted.currency}`);
+    }
+
+    // =====================================
+    // 8. STATUS VALIDATION
+    // =====================================
+    const validStatuses = ['active', 'inactive', 'complete', 'missing'];
+    if (extracted.status && !validStatuses.includes(extracted.status)) {
+      issues.push(`Invalid status value: ${extracted.status}`);
+    }
+
+    // =====================================
+    // 9. TRANSACTION TYPE VALIDATION
+    // =====================================
+    const validTransactionTypes = [
+      'invoice',
+      'payment',
+      'receipt',
+      'statement',
+      'bill',
+      'tax',
+      'credit_card',
+      'other',
+    ];
+    if (extracted.transactionType && !validTransactionTypes.includes(extracted.transactionType)) {
+      issues.push(`Unknown transaction type: ${extracted.transactionType}`);
+    }
+
+    // =====================================
+    // 10. METADATA COMPLETENESS CHECK [web:2][web:3]
+    // =====================================
+    if (!extracted.description || extracted.description.length < 10) {
+      issues.push('Insufficient transaction description (minimum 10 characters required)');
+    }
+
+    // =====================================
+    // 11. RECURRING PAYMENT VALIDATION
+    // =====================================
+    if (extracted.financialMetadata?.isRecurring) {
+      if (!extracted.financialMetadata.frequency) {
+        issues.push('Recurring payment missing frequency (monthly/quarterly/yearly)');
+      }
+      if (!extracted.financialMetadata.dueDate && !extracted.financialMetadata.emiDueDate) {
+        issues.push('Recurring payment missing due date');
+      }
+
+      // Check if due date is in the past
+      if (extracted.financialMetadata.dueDate) {
+        const dueDate = new Date(extracted.financialMetadata.dueDate);
+        if (dueDate < new Date()) {
+          issues.push('Payment due date has passed - action may be required');
+        }
+      }
+    }
+
+    // =====================================
+    // 12. INTEREST RATE VALIDATION (for loans)
+    // =====================================
+    if (extracted.financialMetadata?.interestRate) {
+      if (extracted.financialMetadata.interestRate < 0 || extracted.financialMetadata.interestRate > 50) {
+        issues.push(`Unusual interest rate: ${extracted.financialMetadata.interestRate}% (expected 0-50%)`);
+      }
+    }
+
+    // =====================================
+    // 13. DOCUMENT QUALITY CHECK [web:7]
+    // =====================================
+    if (extracted.confidence < 50) {
+      issues.push('Poor document quality - OCR extraction unreliable (confidence <50%)');
+    }
+
+    // =====================================
+    // 14. 🆕 FILE CONTENT ANALYSIS [web:11][web:16][web:19][web:28]
+    // =====================================
+    if (attachmentContents && attachmentContents.length > 0) {
+      for (const attachment of attachmentContents) {
+        console.log(`🔍 Analyzing file content: ${attachment.filename}`);
+
+        const fileContentIssues = await this.analyzeFileContentIssues(
+          attachment.content,
+          attachment.filename,
+          attachment.mimeType
+        );
+
+        if (fileContentIssues.length > 0) {
+          // Prefix with filename for clarity
+          fileContentIssues.forEach((issue) => {
+            issues.push(`[${attachment.filename}] ${issue}`);
+          });
+        }
+
+        // File size validation [web:28]
+        if (attachment.size === 0) {
+          issues.push(`[${attachment.filename}] File is empty (0 bytes)`);
+        } else if (attachment.size < 100) {
+          issues.push(`[${attachment.filename}] File size too small (${attachment.size} bytes) - possible corruption`);
+        } else if (attachment.size > 10 * 1024 * 1024) {
+          // 10MB
+          issues.push(`[${attachment.filename}] Large file size (${(attachment.size / 1024 / 1024).toFixed(2)} MB) - may impact processing`);
+        }
+
+        // MIME type validation
+        const validMimeTypes = [
+          'application/pdf',
+          'image/png',
+          'image/jpeg',
+          'image/jpg',
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+          'application/msword',
+          'text/csv',
+          'application/vnd.ms-excel',
+          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        ];
+        if (!validMimeTypes.includes(attachment.mimeType)) {
+          issues.push(`[${attachment.filename}] Unsupported or unusual file type: ${attachment.mimeType}`);
+        }
+      }
+    }
+
+    // =====================================
+    // 15. CROSS-FIELD VALIDATION
+    // =====================================
+    // EMI vs Outstanding Balance check
+    if (
+      extracted.financialMetadata?.emiAmount &&
+      extracted.financialMetadata?.outstandingBalance
+    ) {
+      if (extracted.financialMetadata.emiAmount > extracted.financialMetadata.outstandingBalance) {
+        issues.push('EMI amount exceeds outstanding balance - verify data');
+      }
+    }
+
+    // Policy number format validation
+    if (extracted.policyNumber && extracted.policyNumber.length < 5) {
+      issues.push('Policy number appears too short - verify accuracy');
+    }
+
+    // Folio number format validation
+    if (extracted.folioNumber && extracted.folioNumber.length < 4) {
+      issues.push('Folio number appears too short - verify accuracy');
+    }
+
+    // =====================================
+    // REMOVE DUPLICATES & RETURN
+    // =====================================
+    return [...new Set(issues)];
+  }
+
+
 
   private generateSmartSummary(data: EnhancedFinancialData): string {
     const categoryEmoji = {

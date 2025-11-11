@@ -4,6 +4,7 @@ import { UserService } from '@services/user.service';
 import { CreateUserRequest, CreateUserResponse, GetUserResponse } from '@/types/user';
 import JWTService from '@/services/jwt.service';
 import { AuthenticatedRequest, authenticateJWT } from '@/middlewares/auth.middleware';
+import { checkTempUser, deleteTempUser } from '@/middlewares/temp-user.middleware';
 
 const userRouter = Router();
 export const prisma = new PrismaClient();
@@ -13,9 +14,7 @@ const userService = new UserService(prisma);
  * POST /api/users
  * Create new user or return existing user
  */
-userRouter.post('/', async (req: Request, res: Response) => {
-
-  // console.log(req.body)
+userRouter.post('/', checkTempUser, async (req: Request, res: Response) => {
   try {
     const {
       email,
@@ -49,8 +48,11 @@ userRouter.post('/', async (req: Request, res: Response) => {
       return;
     }
 
+    // ✅ Get temp user data from middleware (if exists)
+    const tempUserData = (req as any).tempUserData;
+
     // Create or get user
-    const { user, isNewUser } = await userService.createOrGetUser({
+    const { user, isNewUser, hadTempData } = await userService.createOrGetUser({
       email,
       name,
       password,
@@ -59,12 +61,19 @@ userRouter.post('/', async (req: Request, res: Response) => {
       google_id,
       google_email,
       profile_picture,
+      tempUserData, // ✅ Pass temp user data
     });
+
+    // ✅ If user was created from temp data, delete temp record
+    if (isNewUser && hadTempData) {
+      await deleteTempUser(email);
+      console.log(`✅ Migrated temp user to User table: ${email}`);
+    }
 
     const accessToken = JWTService.signAccessToken({
       userId: user.id,
       email: user.email!,
-    })
+    });
 
     const refreshToken = JWTService.signRefreshToken({
       userId: user.id,
@@ -74,7 +83,9 @@ userRouter.post('/', async (req: Request, res: Response) => {
     const response: CreateUserResponse = {
       success: true,
       message: isNewUser
-        ? 'User created successfully'
+        ? hadTempData 
+          ? 'User created successfully from invitation'
+          : 'User created successfully'
         : 'User already exists',
       user: userService.formatUserResponse(user)!,
       tokens: {
@@ -82,6 +93,7 @@ userRouter.post('/', async (req: Request, res: Response) => {
         refreshToken,
       },
       isNewUser,
+      wasInvited: hadTempData, // ✅ NEW: Indicate if they were invited
     };
 
     res.status(isNewUser ? 201 : 200).json(response);

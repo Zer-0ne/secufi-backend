@@ -70,6 +70,8 @@ export interface UpdateFamilyRequest {
 export interface InviteMemberRequest {
   email: string;
   role: 'member' | 'admin' | 'viewer';
+  name: string;
+  phone: string
 }
 
 export interface MemberResponse {

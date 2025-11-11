@@ -12,52 +12,107 @@ import {
 } from '@/config/interfaces';
 import { prisma } from '@/config/database';
 
+/**
+ * FamilyController - Handles all family-related operations in the application
+ *
+ * This controller manages family group functionality including creation, member management,
+ * invitations, permissions, settings, and access control. It provides comprehensive APIs
+ * for family financial management systems, ensuring secure and controlled access to
+ * family resources and data.
+ *
+ * Key Features:
+ * - Family creation and management (CRUD operations)
+ * - Member invitation and management system
+ * - Role-based access control (owner, admin, member, viewer)
+ * - Permission management for viewing, editing, deleting, and inviting
+ * - Family settings and preferences configuration
+ * - Access granting and revocation for external users
+ * - Invitation lifecycle management (send, accept, reject)
+ *
+ * Security Considerations:
+ * - All methods require JWT authentication
+ * - Permission checks based on user roles and individual permissions
+ * - Family ownership restrictions (one family per user)
+ * - Transaction-based operations for data consistency
+ * - Input validation and error handling
+ *
+ * Database Relations:
+ * - Interacts with Family, FamilyMember, FamilyInvitation, FamilySettings, FamilyRole, FamilyAccess tables
+ * - Uses Prisma ORM for type-safe database operations
+ * - Implements cascading deletes and referential integrity
+ *
+ * @class FamilyController
+ * @static
+ */
 export class FamilyController {
   /**
-   * Create a new family group with the authenticated user as owner
-   *
-   * This method creates a new family entity along with:
-   * - Family member entry for the owner with full permissions
-   * - Default family settings
-   * - Default role definitions (owner, admin, member, viewer)
-   *
-   * @param req - Express request object with authenticated user
-   * @param req.body.name - Required family name (non-empty string)
-   * @param req.body.description - Optional family description
-   * @param res - Express response object
-   *
-   * @returns Promise<Response> - JSON response with created family data or error
-   *
-   * @throws {400} - If family name is missing or empty
-   * @throws {500} - If database transaction fails
-   *
-   * @example
-   * POST /api/families
-   * Authorization: Bearer <jwt_token>
-   * {
-   *   "name": "Smith Family",
-   *   "description": "Family financial management group"
-   * }
-   *
-   * Success Response (201):
-   * {
-   *   "success": true,
-   *   "message": "Family created successfully",
-   *   "data": { ...familyWithDetails }
-   * }
-   */
+ * Create a new family group with the authenticated user as owner
+ *
+ * ⚠️ CONSTRAINT: Each user can only create ONE family
+ *
+ * This method creates a new family entity along with:
+ * - Family member entry for the owner with full permissions
+ * - Default family settings
+ * - Default role definitions (owner, admin, member, viewer)
+ *
+ * @param req - Express request object with authenticated user
+ * @param req.body.name - Required family name (non-empty string)
+ * @param req.body.description - Optional family description
+ * @param res - Express response object
+ *
+ * @returns Promise<Response> - JSON response with created family data or error
+ *
+ * @throws {400} - If family name is missing, empty, or user already owns a family
+ * @throws {500} - If database transaction fails
+ *
+ * @example
+ * POST /api/families
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "name": "Smith Family",
+ *   "description": "Family financial management group"
+ * }
+ *
+ * Success Response (201):
+ * {
+ *   "success": true,
+ *   "message": "Family created successfully",
+ *   "data": { ...familyWithDetails }
+ * }
+ *
+ * Error Response (400) - Already owns family:
+ * {
+ *   "success": false,
+ *   "message": "You already own a family. Each user can only create one family."
+ * }
+ */
   static async createFamily(
     req: AuthenticatedRequest,
     res: Response
   ): Promise<Response> {
     try {
       const userId = req.user?.userId!;
-      const { name, description } = req.body;
+      const { name = userId, description } = req.body;
 
+      // ✅ CHECK 1: Validate family name
       if (!name || name.trim().length === 0) {
         return res.status(400).json({
           success: false,
           message: 'Family name is required',
+        } as ApiResponse<null>);
+      }
+
+      // ✅ CHECK 2: Verify user doesn't already own a family
+      const existingFamily = await prisma.family.findUnique({
+        where: { owner_id: userId },
+        select: { id: true, name: true }
+      });
+
+      if (existingFamily) {
+        return res.status(400).json({
+          success: false,
+          message: 'You already own a family. Each user can only create one family.',
+          error: `Existing family: "${existingFamily.name}"`,
         } as ApiResponse<null>);
       }
 
@@ -194,6 +249,15 @@ export class FamilyController {
       } as ApiResponse<any>);
     } catch (error) {
       console.error('❌ Error creating family:', error);
+
+      // Handle Prisma unique constraint error
+      if (error instanceof Error && error.message.includes('Unique constraint')) {
+        return res.status(400).json({
+          success: false,
+          message: 'You already own a family. Each user can only create one family.',
+        } as ApiResponse<null>);
+      }
+
       return res.status(500).json({
         success: false,
         message: 'Failed to create family',
@@ -201,6 +265,7 @@ export class FamilyController {
       } as ApiResponse<null>);
     }
   }
+
 
   /**
    * Retrieve detailed information about a specific family including members, settings, and roles
@@ -223,7 +288,7 @@ export class FamilyController {
    * @throws {500} - If database query fails
    *
    * @example
-   * GET /api/families/123e4567-e89b-12d3-a456-426614174000
+   * GET /api/families
    * Authorization: Bearer <jwt_token>
    *
    * Success Response (200):
@@ -456,7 +521,7 @@ export class FamilyController {
    * @throws {500} - If database update fails
    *
    * @example
-   * PUT /api/families/123e4567-e89b-12d3-a456-426614174000
+   * PUT /api/families
    * Authorization: Bearer <jwt_token>
    * {
    *   "name": "Updated Smith Family",
@@ -545,7 +610,7 @@ export class FamilyController {
    * @throws {500} - If database deletion fails
    *
    * @example
-   * DELETE /api/families/123e4567-e89b-12d3-a456-426614174000
+   * DELETE /api/families
    * Authorization: Bearer <jwt_token>
    *
    * Success Response (200):
@@ -611,7 +676,7 @@ export class FamilyController {
    * @throws {500} - If database query fails
    *
    * @example
-   * GET /api/families/123e4567-e89b-12d3-a456-426614174000/members
+   * GET /api/families/members
    * Authorization: Bearer <jwt_token>
    *
    * Success Response (200):
@@ -662,6 +727,7 @@ export class FamilyController {
         where: {
           family_id: familyId,
           is_active: true,
+          NOT: { user_id: userId }
         },
         include: {
           user: {
@@ -671,6 +737,13 @@ export class FamilyController {
               email: true,
               phone: true,
               profile_picture: true,
+              assetsSharedWithMe: {
+                select: {
+                  id: true,
+                  asset_id:true
+                }
+              }
+              
             },
           },
         },
@@ -718,7 +791,7 @@ export class FamilyController {
    * @throws {500} - If database transaction fails
    *
    * @example
-   * POST /api/families/123e4567-e89b-12d3-a456-426614174000/invite
+   * POST /api/families/invite
    * Authorization: Bearer <jwt_token>
    * {
    *   "email": "newuser@example.com",
@@ -737,9 +810,29 @@ export class FamilyController {
     res: Response
   ): Promise<Response> {
     try {
-      const familyId = req.params.familyId;
       const userId = req.user?.userId!;
-      const { email, role } = req.body as InviteMemberRequest;
+      const { email, role, name, phone } = req.body as InviteMemberRequest;
+
+      // ✅ NEW: Get familyId from params OR fetch from user's owned family
+      let familyId = req.params.familyId;
+
+      if (!familyId) {
+        // Fetch user's owned family
+        const ownedFamily = await prisma.family.findUnique({
+          where: { owner_id: userId },
+          select: { id: true },
+        });
+
+        if (!ownedFamily) {
+          return res.status(404).json({
+            success: false,
+            message: 'You do not own any family. Please create a family first.',
+          } as ApiResponse<null>);
+        }
+
+        familyId = ownedFamily.id;
+        console.log(`✅ Using owned family ID: ${familyId}`);
+      }
 
       // Verify user has invite permissions
       const membership = await prisma.familyMember.findUnique({
@@ -766,6 +859,44 @@ export class FamilyController {
         return res.status(404).json({
           success: false,
           message: 'Family not found',
+        } as ApiResponse<null>);
+      }
+
+      // ✅ Fetch all available roles for this family
+      const availableRoles = await prisma.familyRole.findMany({
+        where: { family_id: familyId },
+        select: { name: true },
+      });
+
+      const validRoleNames = availableRoles.map(r => r.name);
+
+      // ✅ Validate that role exists in the family's role definitions
+      const requestedRole = role || 'member';
+      const familyRole = await prisma.familyRole.findUnique({
+        where: {
+          family_id_name: {
+            family_id: familyId,
+            name: requestedRole,
+          },
+        },
+      });
+
+      if (!familyRole) {
+        return res.status(400).json({
+          success: false,
+          message: `Role '${requestedRole}' does not exist in this family. Valid roles: ${validRoleNames.join(', ')}`,
+          error: 'Invalid role',
+          availableRoles: validRoleNames,
+        } as ApiResponse<null>);
+      }
+
+      // ✅ Additional validation - prevent inviting as 'owner'
+      if ((requestedRole as any) === 'owner') {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot invite members with owner role. Each family can only have one owner.',
+          error: 'Invalid role',
+          availableRoles: validRoleNames.filter(r => r !== 'owner'),
         } as ApiResponse<null>);
       }
 
@@ -816,7 +947,7 @@ export class FamilyController {
           invited_by_id: userId,
           invited_email: email,
           invited_user_id: invitedUser?.id || null,
-          role: role || 'member',
+          role: requestedRole,
           expires_at: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000), // 7 days
         },
         include: {
@@ -831,14 +962,52 @@ export class FamilyController {
         },
       });
 
-      console.log(`✅ Invitation sent to ${email} for family ${familyId}`);
+      // If user doesn't exist in User table, create TempUser
+      if (!invitedUser) {
+        try {
+          console.log('This user is not registered yet in our platform so inviting him/her via email!');
+          await prisma.tempUser.upsert({
+            where: { email: email.toLowerCase().trim() },
+            create: {
+              email: email.toLowerCase().trim(),
+              name: name || null,
+              phone: phone || null,
+              invited_by_family_id: familyId,
+              invited_role: requestedRole,
+              invitation_id: invitation.id,
+              source: 'family_invitation',
+              expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+            },
+            update: {
+              invited_by_family_id: familyId,
+              invited_role: requestedRole,
+              invitation_id: invitation.id,
+              expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+            },
+          });
+
+          console.log(`✅ Created/Updated temp user for ${email}`);
+        } catch (tempError) {
+          console.error('⚠️ Error creating temp user:', tempError);
+        }
+      }
+
+      console.log(`✅ Invitation sent to ${email} for family ${familyId} with role: ${requestedRole}`);
 
       // TODO: Send invitation email
 
       return res.status(201).json({
         success: true,
-        message: 'Invitation sent successfully',
-        data: invitation,
+        message: invitedUser
+          ? `Invitation sent successfully with role: ${requestedRole}`
+          : `Invitation sent successfully. User will be added as ${requestedRole} when they register.`,
+        data: {
+          invitation,
+          role: requestedRole,
+          isNewUser: !invitedUser,
+          registrationRequired: !invitedUser,
+          familyId: familyId, // ✅ Include familyId in response
+        },
       } as ApiResponse<any>);
     } catch (error) {
       console.error('❌ Error inviting member:', error);
@@ -849,6 +1018,9 @@ export class FamilyController {
       } as ApiResponse<null>);
     }
   }
+
+
+
 
   /**
    * Accept a pending family invitation
@@ -869,7 +1041,7 @@ export class FamilyController {
    * @throws {500} - If database transaction fails
    *
    * @example
-   * POST /api/families/invitations/123e4567-e89b-12d3-a456-426614174000/accept
+   * POST /api/families/invitations/accept
    * Authorization: Bearer <jwt_token>
    *
    * Success Response (200):
@@ -998,7 +1170,7 @@ export class FamilyController {
    * @throws {500} - If database update fails
    *
    * @example
-   * POST /api/families/invitations/123e4567-e89b-12d3-a456-426614174000/reject
+   * POST /api/families/invitations/reject
    * Authorization: Bearer <jwt_token>
    *
    * Success Response (200):
@@ -1185,7 +1357,7 @@ export class FamilyController {
    * @throws {500} - If database update fails
    *
    * @example
-   * DELETE /api/families/123e4567-e89b-12d3-a456-426614174000/members
+   * DELETE /api/families/members
    * Authorization: Bearer <jwt_token>
    * {
    *   "memberId": "member-uuid"
@@ -1305,7 +1477,7 @@ export class FamilyController {
    * @throws {500} - If database update fails
    *
    * @example
-   * PUT /api/families/123e4567-e89b-12d3-a456-426614174000/members/role
+   * PUT /api/families/members/role
    * Authorization: Bearer <jwt_token>
    * {
    *   "memberId": "member-uuid",
@@ -1438,7 +1610,7 @@ export class FamilyController {
    * @throws {500} - If database update fails
    *
    * @example
-   * POST /api/families/123e4567-e89b-12d3-a456-426614174000/leave
+   * POST /api/families/leave
    * Authorization: Bearer <jwt_token>
    *
    * Success Response (200):
@@ -1794,7 +1966,7 @@ export class FamilyController {
    * @throws {500} - If database operation fails
    *
    * @example
-   * PUT /api/families/123e4567-e89b-12d3-a456-426614174000/settings
+   * PUT /api/families/settings
    * Authorization: Bearer <jwt_token>
    * {
    *   "canShareAssets": true,

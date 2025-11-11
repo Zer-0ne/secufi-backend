@@ -38,7 +38,12 @@ export async function authenticateJWT(req: AuthenticatedRequest, res: Response, 
         const user = await userService.getUserByAccessToken(req, res);
         const { id } = user as User;
         await googleService.setUserId(id);
+        const familyId = await await prisma.family.findUnique({
+            where: { owner_id: id },
+            select: { id: true },
+        });
         req.user = payload;
+        req.params.familyId = familyId?.id!
         return next();
     } catch (error) {
         return res.status(401).json({ success: false, message: 'Unauthorized', error: error instanceof Error ? error.message : error });

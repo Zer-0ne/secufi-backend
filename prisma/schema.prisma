@@ -6,71 +6,74 @@ datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
 }
+
 // ============================================================================
 // User Model with Family Management
 // ============================================================================
 
 model User {
-  id                   String    @id @default(uuid()) @db.Uuid
-  name                 String?
-  email                String?   @unique
-  role                 String?   @default("user")
-  password             String?
-  
+  id       String  @id @default(uuid()) @db.Uuid
+  name     String?
+  email    String? @unique
+  role     String? @default("user")
+  password String?
+
   // OTP Authentication Fields
-  otp                  String?   @db.VarChar(6)
-  otp_expires_at       DateTime?
-  
+  otp            String?   @db.VarChar(6)
+  otp_expires_at DateTime?
+
   // User Type
-  user_type            String?   @default("parent") @db.VarChar(20)
-  
+  user_type String? @default("parent") @db.VarChar(20)
+
   // Google OAuth fields
-  google_id            String?   @unique
-  google_email         String?
-  profile_picture      String?   @db.Text
-  is_google_user       Boolean   @default(false)
-  is_verified          Boolean   @default(false)
-  is_active            Boolean   @default(true)
-  last_login           DateTime?
-  
+  google_id       String?   @unique
+  google_email    String?
+  profile_picture String?   @db.Text
+  is_google_user  Boolean   @default(false)
+  is_verified     Boolean   @default(false)
+  is_active       Boolean   @default(true)
+  last_login      DateTime?
+
   // Contact Information
-  phone                String?   @unique @db.VarChar(15)
-  address              String?   @db.Text
-  date_of_birth        DateTime?
-  
+  phone         String?   @unique @db.VarChar(15)
+  address       String?   @db.Text
+  date_of_birth DateTime?
+
   // Financial information
-  pan_number           String?   @unique @db.VarChar(10)
-  aadhar_number        String?   @unique @db.VarChar(12)
-  gstin                String?   @unique @db.VarChar(15)
-  asset_preference     Json?     @default("{}")
-  customer_id          String?   @db.VarChar(50)
-  account_number       String?   @db.VarChar(50)
-  
+  pan_number       String? @unique @db.VarChar(10)
+  aadhar_number    String? @unique @db.VarChar(12)
+  gstin            String? @unique @db.VarChar(15)
+  asset_preference Json?   @default("{}")
+  customer_id      String? @db.VarChar(50)
+  account_number   String? @db.VarChar(50)
+
   // Family Relations
-  family_memberships   FamilyMember[] @relation("UserFamilies")
-  
+  family_memberships FamilyMember[] @relation("UserFamilies")
+
   // Family Ownership (if this user is the family head/owner)
-  owned_families       Family[]  @relation("FamilyOwner")
-  
+  owned_family Family? @relation("FamilyOwner")
+
   // Family Invitations - Explicit relation names
   invitations_sent     FamilyInvitation[] @relation("InvitedBy")
   invitations_received FamilyInvitation[] @relation("InvitedUser")
-  
+
   // Audit fields
-  created_at           DateTime  @default(now())
-  updated_at           DateTime  @updatedAt
-  
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   // Relations
-  transactions         Transaction[]
-  pdf_documents        PdfDocument[]
-  documents            Document[]
-  sessions             Session[]
-  assets               Asset[]
-  google_credentials   GoogleCredential?
-  family_access_as_parent FamilyAccess[] @relation("ParentUser")
-  family_access_as_family FamilyAccess[] @relation("FamilyUser")
-  activity_logs        ActivityLog[]
-  
+  transactions            Transaction[]
+  pdf_documents           PdfDocument[]
+  documents               Document[]
+  sessions                Session[]
+  assets                  Asset[]
+  google_credentials      GoogleCredential?
+  family_access_as_parent FamilyAccess[]    @relation("ParentUser")
+  family_access_as_family FamilyAccess[]    @relation("FamilyUser")
+  activity_logs           ActivityLog[]
+  assetsSharedByMe        SharedAsset[]     @relation("SharedByUser")
+  assetsSharedWithMe      SharedAsset[]     @relation("SharedWithUser")
+
   @@index([email])
   @@index([phone])
   @@index([google_id])
@@ -81,68 +84,67 @@ model User {
   @@map("users")
 }
 
-
 // ============================================================================
 // Family Model - Represents a family group
 // ============================================================================
 
 model Family {
-  id                String    @id @default(uuid()) @db.Uuid
-  
+  id String @id @default(uuid()) @db.Uuid
+
   // Basic Info
-  name              String    @db.VarChar(100)
-  description       String?   @db.Text
-  
-  // Owner/Admin
-  owner_id          String    @db.Uuid
-  owner             User      @relation("FamilyOwner", fields: [owner_id], references: [id], onDelete: Cascade)
-  
+  name        String  @db.VarChar(100)
+  description String? @db.Text
+
+  // Owner/Admin - Add @unique constraint
+  owner_id String @unique @db.Uuid
+  owner    User   @relation("FamilyOwner", fields: [owner_id], references: [id], onDelete: Cascade)
+
   // Members
-  members           FamilyMember[] @relation("FamilyMembers")
-  
+  members FamilyMember[] @relation("FamilyMembers")
+
   // Settings
-  settings          FamilySettings?
-  
+  settings FamilySettings?
+
   // Roles & Permissions
-  roles             FamilyRole[]
-  
+  roles FamilyRole[]
+
   // Member requests/invitations
-  invitations       FamilyInvitation[]
-  
+  invitations FamilyInvitation[]
+
   // Audit
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-  
+  created_at   DateTime      @default(now())
+  updated_at   DateTime      @updatedAt
+  sharedAssets SharedAsset[]
+
   @@index([owner_id])
   @@index([name])
   @@map("families")
 }
 
-
 // Add this new model
 model FamilyMember {
-  id                String    @id @default(uuid()) @db.Uuid
-  
-  family_id         String    @db.Uuid
-  family            Family    @relation("FamilyMembers", fields: [family_id], references: [id], onDelete: Cascade)
-  
-  user_id           String    @db.Uuid
-  user              User      @relation("UserFamilies", fields: [user_id], references: [id], onDelete: Cascade)
-  
+  id String @id @default(uuid()) @db.Uuid
+
+  family_id String @db.Uuid
+  family    Family @relation("FamilyMembers", fields: [family_id], references: [id], onDelete: Cascade)
+
+  user_id String @db.Uuid
+  user    User   @relation("UserFamilies", fields: [user_id], references: [id], onDelete: Cascade)
+
   // Role in this specific family
-  role              String    @db.VarChar(20) // "owner", "admin", "member", "viewer"
-  
+  role String @db.VarChar(20) // "owner", "admin", "member", "viewer"
+
   // Permissions for this membership
-  can_view          Boolean   @default(true)
-  can_edit          Boolean   @default(false)
-  can_delete        Boolean   @default(false)
-  can_invite        Boolean   @default(false)
-  
+  can_view   Boolean @default(true)
+  can_edit   Boolean @default(false)
+  can_delete Boolean @default(false)
+  can_invite Boolean @default(false)
+
   // Membership status
-  is_active         Boolean   @default(true)
-  joined_at         DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-  
+  is_active  Boolean  @default(true)
+  joined_at  DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   @@unique([family_id, user_id])
   @@index([family_id])
   @@index([user_id])
@@ -150,40 +152,39 @@ model FamilyMember {
   @@map("family_members")
 }
 
-
 // ============================================================================
 // Family Invitation Model - WITH EXPLICIT RELATION NAMES
 // ============================================================================
 
 model FamilyInvitation {
-  id                String    @id @default(uuid()) @db.Uuid
-  
+  id String @id @default(uuid()) @db.Uuid
+
   // Invitation Details
-  family_id         String    @db.Uuid
-  family            Family    @relation(fields: [family_id], references: [id], onDelete: Cascade)
-  
+  family_id String @db.Uuid
+  family    Family @relation(fields: [family_id], references: [id], onDelete: Cascade)
+
   // User who sent the invitation
-  invited_by_id     String    @db.Uuid
-  invited_by        User      @relation("InvitedBy", fields: [invited_by_id], references: [id], onDelete: Cascade)
-  
+  invited_by_id String @db.Uuid
+  invited_by    User   @relation("InvitedBy", fields: [invited_by_id], references: [id], onDelete: Cascade)
+
   // Invitee info (User who received the invitation)
-  invited_email     String    @db.VarChar(255)
-  invited_user_id   String?   @db.Uuid
-  invited_user      User?     @relation("InvitedUser", fields: [invited_user_id], references: [id], onDelete: SetNull)
-  
+  invited_email   String  @db.VarChar(255)
+  invited_user_id String? @db.Uuid
+  invited_user    User?   @relation("InvitedUser", fields: [invited_user_id], references: [id], onDelete: SetNull)
+
   // Invitation Status
-  status            String    @default("pending") @db.VarChar(20) // "pending", "accepted", "rejected", "expired"
-  role              String    @default("member") @db.VarChar(20)
-  
+  status String @default("pending") @db.VarChar(20) // "pending", "accepted", "rejected", "expired"
+  role   String @default("member") @db.VarChar(20)
+
   // Expiration
-  expires_at        DateTime?
-  accepted_at       DateTime?
-  rejected_at       DateTime?
-  
+  expires_at  DateTime?
+  accepted_at DateTime?
+  rejected_at DateTime?
+
   // Audit
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-  
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   @@unique([family_id, invited_email])
   @@index([family_id])
   @@index([invited_by_id])
@@ -198,30 +199,30 @@ model FamilyInvitation {
 // ============================================================================
 
 model FamilySettings {
-  id                String    @id @default(uuid()) @db.Uuid
-  
-  family_id         String    @unique @db.Uuid
-  family            Family    @relation(fields: [family_id], references: [id], onDelete: Cascade)
-  
+  id String @id @default(uuid()) @db.Uuid
+
+  family_id String @unique @db.Uuid
+  family    Family @relation(fields: [family_id], references: [id], onDelete: Cascade)
+
   // Privacy Settings
-  can_share_assets  Boolean   @default(true)
-  can_view_others   Boolean   @default(true)
-  require_approval  Boolean   @default(false)
-  
+  can_share_assets Boolean @default(true)
+  can_view_others  Boolean @default(true)
+  require_approval Boolean @default(false)
+
   // Financial Settings
-  currency          String    @default("INR") @db.VarChar(10)
+  currency             String @default("INR") @db.VarChar(10)
   financial_year_start String @default("01-04") // Format: MM-DD
-  
+
   // Notifications
-  notify_large_transactions Boolean @default(true)
-  large_transaction_threshold Float @default(100000)
-  
+  notify_large_transactions   Boolean @default(true)
+  large_transaction_threshold Float   @default(100000)
+
   // Metadata
-  data              Json?     @default("{}")
-  
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-  
+  data Json? @default("{}")
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   @@index([family_id])
   @@map("family_settings")
 }
@@ -231,23 +232,23 @@ model FamilySettings {
 // ============================================================================
 
 model FamilyRole {
-  id                String    @id @default(uuid()) @db.Uuid
-  
-  family_id         String    @db.Uuid
-  family            Family    @relation(fields: [family_id], references: [id], onDelete: Cascade)
-  
+  id String @id @default(uuid()) @db.Uuid
+
+  family_id String @db.Uuid
+  family    Family @relation(fields: [family_id], references: [id], onDelete: Cascade)
+
   // Role Details
-  name              String    @db.VarChar(50) // "owner", "admin", "member", "viewer"
-  description       String?   @db.Text
-  
+  name        String  @db.VarChar(50) // "owner", "admin", "member", "viewer"
+  description String? @db.Text
+
   // Permissions (stored as JSON for flexibility)
-  permissions       Json      @default("{}") 
-  
-  is_default        Boolean   @default(false)
-  
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-  
+  permissions Json @default("{}")
+
+  is_default Boolean @default(false)
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   @@unique([family_id, name])
   @@index([family_id])
   @@map("family_roles")
@@ -258,32 +259,32 @@ model FamilyRole {
 // ============================================================================
 
 model FamilyAccess {
-  id                String    @id @default(uuid()) @db.Uuid
-  
+  id String @id @default(uuid()) @db.Uuid
+
   // Parent-Child relationship
-  parent_user_id    String    @db.Uuid
-  parent_user       User      @relation("ParentUser", fields: [parent_user_id], references: [id], onDelete: Cascade)
-  
-  child_user_id     String    @db.Uuid
-  child_user        User      @relation("FamilyUser", fields: [child_user_id], references: [id], onDelete: Cascade)
-  
+  parent_user_id String @db.Uuid
+  parent_user    User   @relation("ParentUser", fields: [parent_user_id], references: [id], onDelete: Cascade)
+
+  child_user_id String @db.Uuid
+  child_user    User   @relation("FamilyUser", fields: [child_user_id], references: [id], onDelete: Cascade)
+
   // Access Type
-  access_type       String    @db.VarChar(50) // "view", "edit", "full"
-  
+  access_type String @db.VarChar(50) // "view", "edit", "full"
+
   // Resource Access
-  can_view_assets   Boolean   @default(true)
-  can_edit_assets   Boolean   @default(false)
-  can_delete_assets Boolean   @default(false)
-  
+  can_view_assets   Boolean @default(true)
+  can_edit_assets   Boolean @default(false)
+  can_delete_assets Boolean @default(false)
+
   // Status
-  is_active         Boolean   @default(true)
-  
+  is_active Boolean @default(true)
+
   // Restrictions
-  access_until      DateTime?
-  
-  created_at        DateTime  @default(now())
-  updated_at        DateTime  @updatedAt
-  
+  access_until DateTime?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   @@unique([parent_user_id, child_user_id])
   @@index([parent_user_id])
   @@index([child_user_id])
@@ -295,27 +296,27 @@ model FamilyAccess {
 // ============================================================================
 
 model ActivityLog {
-  id                String    @id @default(uuid()) @db.Uuid
-  
-  user_id           String    @db.Uuid
-  user              User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  
+  id String @id @default(uuid()) @db.Uuid
+
+  user_id String @db.Uuid
+  user    User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   // Activity Details
-  action            String    @db.VarChar(100) // "create_asset", "update_asset", "share_data", etc.
-  entity_type       String    @db.VarChar(50) // "asset", "transaction", "family_member"
-  entity_id         String?   @db.VarChar(100)
-  
+  action      String  @db.VarChar(100) // "create_asset", "update_asset", "share_data", etc.
+  entity_type String  @db.VarChar(50) // "asset", "transaction", "family_member"
+  entity_id   String? @db.VarChar(100)
+
   // Change tracking
-  changes           Json?     @default("{}")
-  old_values        Json?     @default("{}")
-  new_values        Json?     @default("{}")
-  
+  changes    Json? @default("{}")
+  old_values Json? @default("{}")
+  new_values Json? @default("{}")
+
   // Metadata
-  ip_address        String?   @db.VarChar(45)
-  user_agent        String?   @db.Text
-  
-  created_at        DateTime  @default(now())
-  
+  ip_address String? @db.VarChar(45)
+  user_agent String? @db.Text
+
+  created_at DateTime @default(now())
+
   @@index([user_id])
   @@index([action])
   @@index([created_at])
@@ -328,30 +329,30 @@ model ActivityLog {
 // ============================================================================
 
 model GoogleCredential {
-  id                 String    @id @default(uuid()) @db.Uuid
-  user_id            String    @unique @db.Uuid
-  
+  id      String @id @default(uuid()) @db.Uuid
+  user_id String @unique @db.Uuid
+
   // Encrypted credentials (AES)
-  encrypted_access_token String  @db.Text
+  encrypted_access_token  String @db.Text
   encrypted_refresh_token String @db.Text
-  
+
   // Token expiry
-  access_token_expires_at DateTime
+  access_token_expires_at  DateTime
   refresh_token_expires_at DateTime
-  
+
   // IV for AES (stored separately for decryption)
-  access_token_iv    String    @db.VarChar(32)
-  refresh_token_iv   String    @db.VarChar(32)
-  
+  access_token_iv  String @db.VarChar(32)
+  refresh_token_iv String @db.VarChar(32)
+
   // Auto-expiry field (for cleanup)
-  expires_at         DateTime
-  
+  expires_at DateTime
+
   // Metadata
-  created_at         DateTime  @default(now())
-  updated_at         DateTime  @updatedAt
-  
-  user               User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   @@index([user_id])
   @@index([expires_at])
   @@index([access_token_expires_at])
@@ -369,9 +370,9 @@ model Session {
   expires_at    DateTime
   created_at    DateTime @default(now())
   updated_at    DateTime @updatedAt
-  
-  user          User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   @@index([session_token])
   @@index([expires_at])
   @@index([user_id])
@@ -401,10 +402,10 @@ model Transaction {
   extracted_data   Json?
   created_at       DateTime          @default(now())
   updated_at       DateTime          @updatedAt
-  
-  user             User              @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  pdf_documents    PdfDocument[]
-  
+
+  user          User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  pdf_documents PdfDocument[]
+
   @@index([user_id])
   @@index([email_id])
   @@index([transaction_type])
@@ -419,27 +420,27 @@ model Transaction {
 // ============================================================================
 
 model PdfDocument {
-  id                    String           @id @default(uuid()) @db.Uuid
-  user_id               String           @db.Uuid
-  transaction_id        String?          @db.Uuid
-  filename              String           @db.VarChar(500)
-  original_filename     String           @db.VarChar(500)
-  file_path             String?          @db.Text
-  file_size             BigInt
-  mime_type             String           @default("application/pdf") @db.VarChar(100)
-  parsing_status        ParsingStatus    @default(completed)
-  parsing_error         String?          @db.Text
-  extracted_text        String?          @db.Text
-  extracted_data        Json?
-  page_count            Int?
-  upload_source         UploadSource     @default(gmail)
-  gmail_attachment_id   String?          @db.VarChar(500)
-  created_at            DateTime         @default(now())
-  updated_at            DateTime         @updatedAt
-  
-  user                  User             @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  transaction           Transaction?     @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
-  
+  id                  String        @id @default(uuid()) @db.Uuid
+  user_id             String        @db.Uuid
+  transaction_id      String?       @db.Uuid
+  filename            String        @db.VarChar(500)
+  original_filename   String        @db.VarChar(500)
+  file_path           String?       @db.Text
+  file_size           BigInt
+  mime_type           String        @default("application/pdf") @db.VarChar(100)
+  parsing_status      ParsingStatus @default(completed)
+  parsing_error       String?       @db.Text
+  extracted_text      String?       @db.Text
+  extracted_data      Json?
+  page_count          Int?
+  upload_source       UploadSource  @default(gmail)
+  gmail_attachment_id String?       @db.VarChar(500)
+  created_at          DateTime      @default(now())
+  updated_at          DateTime      @updatedAt
+
+  user        User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transaction_id], references: [id], onDelete: SetNull)
+
   @@index([user_id])
   @@index([transaction_id])
   @@index([parsing_status])
@@ -452,53 +453,53 @@ model PdfDocument {
 // ============================================================================
 
 model Document {
-  id                    String              @id @default(uuid()) @db.Uuid
-  user_id               String              @db.Uuid
-  filename              String
-  original_filename     String
-  file_path             String?             @db.Text
-  file_size             BigInt
-  mime_type             String              @default("application/pdf")
-  upload_source         String?             @default("gmail")
-  
+  id                String  @id @default(uuid()) @db.Uuid
+  user_id           String  @db.Uuid
+  filename          String
+  original_filename String
+  file_path         String? @db.Text
+  file_size         BigInt
+  mime_type         String  @default("application/pdf")
+  upload_source     String? @default("gmail")
+
   // Parsing status and results
-  parsing_status        ParsingStatus       @default(completed)
-  parsing_error         String?             @db.Text
-  extracted_text        String?             @db.Text
-  
+  parsing_status ParsingStatus @default(completed)
+  parsing_error  String?       @db.Text
+  extracted_text String?       @db.Text
+
   // AI Classification results
-  document_type         String?
-  document_category     String?
-  confidence_score      Float?
-  
+  document_type     String?
+  document_category String?
+  confidence_score  Float?
+
   // Structured extracted data
-  extracted_data        Json?
-  
+  extracted_data Json?
+
   // Gap detection and auto-fill
-  gap_detection_status  GapDetectionStatus  @default(pending)
-  detected_gaps         Json?
-  auto_fill_attempts    Json?
-  auto_fill_status      AutoFillStatus      @default(pending)
-  
+  gap_detection_status GapDetectionStatus @default(pending)
+  detected_gaps        Json?
+  auto_fill_attempts   Json?
+  auto_fill_status     AutoFillStatus     @default(pending)
+
   // Processing metadata
-  processing_method     ProcessingMethod?
-  processing_duration   Int?
-  ai_model_used         String?
-  
+  processing_method   ProcessingMethod?
+  processing_duration Int?
+  ai_model_used       String?
+
   // Document metadata
   page_count            Int?
-  is_password_protected Boolean             @default(false)
-  password              String?             @db.Text
-  
+  is_password_protected Boolean @default(false)
+  password              String? @db.Text
+
   // Quality and validation
-  data_quality_score    Float?
-  validation_errors     Json?
-  
-  created_at            DateTime            @default(now())
-  updated_at            DateTime            @updatedAt
-  
-  user                  User                @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  
+  data_quality_score Float?
+  validation_errors  Json?
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
   @@index([user_id])
   @@index([parsing_status])
   @@index([document_type])
@@ -511,58 +512,62 @@ model Document {
 // ============================================================================
 
 model Asset {
-  id                String         @id @default(uuid()) @db.Uuid
-  user_id           String         @db.Uuid
-  name              String?
-  
+  id      String  @id @default(uuid()) @db.Uuid
+  user_id String  @db.Uuid
+  name    String?
+
   // 🎯 Main Category (3 types)
-  type              String         // 'asset' | 'liability' | 'insurance'
-  sub_type          String?        // Detailed type within category
-  
+  type     String // 'asset' | 'liability' | 'insurance'
+  sub_type String? // Detailed type within category
+
   // 🏦 Bank/Financial Account Details
-  account_number    String?        @db.VarChar(50)
-  ifsc_code         String?        @db.VarChar(11)
-  branch_name       String?        @db.VarChar(200)
-  bank_name         String?        @db.VarChar(200)
-  
+  account_number String? @db.VarChar(50)
+  ifsc_code      String? @db.VarChar(11)
+  branch_name    String? @db.VarChar(200)
+  bank_name      String? @db.VarChar(200)
+
   // 💰 Financial Values
-  balance           Decimal?       @db.Decimal(15, 2)
-  total_value       Decimal?       @db.Decimal(15, 2)   // Current value
-  
+  balance     Decimal? @db.Decimal(15, 2)
+  total_value Decimal? @db.Decimal(15, 2) // Current value
+
   // 📊 Status & Tracking
-  status            String?        @default("active")    // 'active' | 'inactive' | 'pending' | 'complete' | 'missing'
-  last_updated      DateTime       @default(now())
-  
+  status       String?  @default("inactive") // 'active' | 'inactive' | 'complete' | 'missing'
+  last_updated DateTime @default(now())
+
   // 🏢 Address & Location
-  address           String?        @db.Text
-  
+  address String? @db.Text
+
   // 👤 Nominee/Beneficiary Details
-  nominee           Json?          @default("[]")        // [{name, relation, percentage}]
-  
+  nominee Json? @default("[]") // [{name, relation, percentage}]
+
   // 💳 Insurance Specific Fields
-  policy_number     String?        @db.VarChar(100)
-  fund_name         String?        @db.VarChar(200)     // For mutual funds
-  folio_number      String?        @db.VarChar(100)     // For mutual funds/insurance
-  
+  policy_number String? @db.VarChar(100)
+  fund_name     String? @db.VarChar(200) // For mutual funds
+  folio_number  String? @db.VarChar(100) // For mutual funds/insurance
+
   // 📄 Document/Attachment Fields
-  document_type     String?        // "invoice", "statement", "receipt", etc.
-  document_metadata Json?          // Store AI analysis here
+  document_type     String? // "invoice", "statement", "receipt", etc.
+  document_metadata Json? // Store AI analysis here
   file_name         String?
   file_size         Int?
   mime_type         String?
-  file_content      String?        @db.Text             // Base64 content or file path
-  
+  file_content      String? @db.Text // Base64 content or file path
+
   // 🔗 References
-  transaction_id    String?        @db.Uuid
-  email_id          String?
-  
+  transaction_id String? @db.Uuid
+  email_id       String?
+
   // ⏰ Timestamps
-  created_at        DateTime       @default(now())
-  updated_at        DateTime       @updatedAt
-  
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
   // Relations
-  user              User           @relation(fields: [user_id], references: [id], onDelete: Cascade)
-  
+  user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  // issue 
+  issues       String[]      @default([])
+  sharedAssets SharedAsset[]
+
   @@index([user_id])
   @@index([type])
   @@index([sub_type])
@@ -571,6 +576,79 @@ model Asset {
   @@index([account_number])
   @@index([policy_number])
   @@map("assets")
+}
+
+// ============================================================================
+// Temporary User Model (for pending invitations)
+// ============================================================================
+
+model TempUser {
+  id    String  @id @default(uuid()) @db.Uuid
+  email String  @unique @db.VarChar(255)
+  name  String? @db.VarChar(100)
+  phone String? @db.VarChar(15)
+
+  // Invitation context
+  invited_by_family_id String? @db.Uuid
+  invited_role         String? @db.VarChar(20) // Role they'll get when they join
+  invitation_id        String? @db.Uuid // Link to FamilyInvitation
+
+  // Metadata
+  source     String    @default("family_invitation") @db.VarChar(50)
+  created_at DateTime  @default(now())
+  expires_at DateTime? // Auto-delete after expiry
+
+  @@index([email])
+  @@index([invited_by_family_id])
+  @@index([expires_at])
+  @@map("temp_users")
+}
+
+// ============================================================================
+// Shared Asset Model - Track assets shared within family
+// ============================================================================
+
+model SharedAsset {
+  id       String @id @default(uuid()) @db.Uuid
+  asset_id String @db.Uuid
+  asset    Asset  @relation(fields: [asset_id], references: [id], onDelete: Cascade)
+
+  // Who shared this asset
+  shared_by_user_id String @db.Uuid
+  shared_by_user    User   @relation("SharedByUser", fields: [shared_by_user_id], references: [id], onDelete: Cascade)
+
+  // Shared with which family
+  family_id String @db.Uuid
+  family    Family @relation(fields: [family_id], references: [id], onDelete: Cascade)
+
+  // Optional: Shared with specific user (null = shared with entire family)
+  shared_with_user_id String? @db.Uuid
+  shared_with_user    User?   @relation("SharedWithUser", fields: [shared_with_user_id], references: [id], onDelete: Cascade)
+
+  // Permissions for this shared asset (overrides family role permissions)
+  can_view   Boolean @default(true)
+  can_edit   Boolean @default(false)
+  can_delete Boolean @default(false)
+
+  // Status
+  is_active Boolean @default(true)
+
+  // Expiry (optional)
+  expires_at DateTime?
+
+  // Metadata
+  notes String? @db.Text
+
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@unique([asset_id, family_id, shared_with_user_id])
+  @@index([asset_id])
+  @@index([family_id])
+  @@index([shared_by_user_id])
+  @@index([shared_with_user_id])
+  @@index([is_active])
+  @@map("shared_assets")
 }
 
 // ============================================================================

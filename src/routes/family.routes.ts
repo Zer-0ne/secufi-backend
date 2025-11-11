@@ -1,6 +1,18 @@
 /**
  * Family Management Routes
- * Handles family creation, member management, access control, and settings
+ *
+ * This module defines all API routes related to family management functionality.
+ * It handles family creation, member management, access control, invitations,
+ * and family settings. All routes require JWT authentication.
+ *
+ * Routes are organized into logical sections:
+ * - Family CRUD operations
+ * - Member management
+ * - Invitation handling
+ * - Access control (parent-child relationships)
+ * - Family settings
+ *
+ * @module FamilyRoutes
  */
 
 import { Router } from 'express';
@@ -14,85 +26,298 @@ const familyRoutes = Router();
 // ============================================================================
 
 /**
- * POST /families
- * Create a new family
+ * Create a new family group
+ *
+ * Creates a new family entity with the authenticated user as the owner.
+ * Each user can only create and own one family. The family includes
+ * default settings, roles, and the owner as the first member.
+ *
+ * @route POST /api/families
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {Object} req.body
+ * @param {string} [req.body.name] - Family name (defaults to user ID if not provided)
+ * @param {string} [req.body.description] - Optional family description
+ * @returns {Object} 201 - Success response with created family data
+ * @returns {Object} 400 - Bad request (missing name, already owns family)
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * POST /api/families
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "name": "Smith Family",
+ *   "description": "Family financial management group"
+ * }
  */
 familyRoutes.post('/', authenticateJWT, FamilyController.createFamily);
 
 /**
- * GET /families
- * Get all families where user is a member
+ * Get all families where authenticated user is a member
+ *
+ * Retrieves a comprehensive list of all family groups the user belongs to,
+ * including family details, member information, settings, and the user's
+ * specific role and permissions within each family.
+ *
+ * @route GET /api/families
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @returns {Object} 200 - Success response with array of user's families
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * GET /api/families
+ * Authorization: Bearer <jwt_token>
  */
 familyRoutes.get('/', authenticateJWT, FamilyController.getUserFamilies);
 
 /**
- * GET /families/:familyId
- * Get specific family details
+ * Get detailed information about a specific family
+ *
+ * Retrieves comprehensive family data including members, settings, roles,
+ * and pending invitations. Only active family members can access this information.
+ *
+ * @route GET /api/families
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family to retrieve
+ * @returns {Object} 200 - Success response with family details
+ * @returns {Object} 403 - Forbidden (not a member or inactive membership)
+ * @returns {Object} 404 - Family not found
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * GET /api/families
+ * Authorization: Bearer <jwt_token>
  */
-familyRoutes.get('/:familyId', authenticateJWT, FamilyController.getFamilyDetails);
+familyRoutes.get('', authenticateJWT, FamilyController.getFamilyDetails);
 
 /**
- * PUT /families/:familyId
  * Update family details
+ *
+ * Allows authorized family members to modify basic family information
+ * such as name and description. Only members with edit permissions can update.
+ *
+ * @route PUT /api/families
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family to update
+ * @param {Object} req.body
+ * @param {string} [req.body.name] - New family name
+ * @param {string} [req.body.description] - New family description
+ * @returns {Object} 200 - Success response with updated family data
+ * @returns {Object} 403 - Forbidden (insufficient permissions)
+ * @returns {Object} 404 - Family not found
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * PUT /api/families
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "name": "Updated Smith Family",
+ *   "description": "Updated family description"
+ * }
  */
-familyRoutes.put('/:familyId', authenticateJWT, FamilyController.updateFamily);
+familyRoutes.put('', authenticateJWT, FamilyController.updateFamily);
 
 /**
- * DELETE /families/:familyId
- * Delete family (owner only)
+ * Delete a family group permanently
+ *
+ * Allows the family owner to completely remove a family group from the system.
+ * All associated data including members, settings, roles, and invitations
+ * will be deleted. Only the family owner can perform this action.
+ *
+ * @route DELETE /api/families
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family to delete
+ * @returns {Object} 200 - Success response confirming deletion
+ * @returns {Object} 403 - Forbidden (not the owner)
+ * @returns {Object} 404 - Family not found
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * DELETE /api/families
+ * Authorization: Bearer <jwt_token>
  */
-familyRoutes.delete('/:familyId', authenticateJWT, FamilyController.deleteFamily);
+familyRoutes.delete('', authenticateJWT, FamilyController.deleteFamily);
 
 // ============================================================================
 // Family Members Routes
 // ============================================================================
 
 /**
- * GET /families/:familyId/members
- * Get all family members
+ * Get all active members of a specific family
+ *
+ * Retrieves a list of all active family members including their user details,
+ * roles, and permissions. Members are ordered by their join date.
+ * Only active family members can access this information.
+ *
+ * @route GET /api/families/members
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family to retrieve members for
+ * @returns {Object} 200 - Success response with array of family members
+ * @returns {Object} 403 - Forbidden (not a family member)
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * GET /api/families/members
+ * Authorization: Bearer <jwt_token>
  */
-familyRoutes.get('/:familyId/members', authenticateJWT, FamilyController.getFamilyMembers);
+familyRoutes.get('/members', authenticateJWT, FamilyController.getFamilyMembers);
 
 /**
- * POST /families/:familyId/members/invite
- * Invite member to family
- * @body { email, role }
+ * Invite a user to join a family group
+ *
+ * Allows authorized family members to send invitations to new users via email.
+ * The invitation includes the user's role and expires after 7 days. If the invited
+ * email corresponds to an existing user, their ID is stored; otherwise, it's set
+ * to null for future registration.
+ *
+ * @route POST /api/families/members/invite
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family to invite the user to
+ * @param {Object} req.body
+ * @param {string} req.body.email - Email address of the user to invite
+ * @param {string} [req.body.role='member'] - Role for the invited user
+ * @param {string} [req.body.name] - Optional name for non-registered users
+ * @param {string} [req.body.phone] - Optional phone for non-registered users
+ * @returns {Object} 201 - Success response with invitation data
+ * @returns {Object} 403 - Forbidden (insufficient permissions)
+ * @returns {Object} 404 - Family not found
+ * @returns {Object} 400 - Bad request (user already in family, invalid role, etc.)
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * POST /api/families/members/invite
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "email": "newuser@example.com",
+ *   "role": "member",
+ *   "name": "John Doe",
+ *   "phone": "+1234567890"
+ * }
  */
-familyRoutes.post('/:familyId/members/invite', authenticateJWT, FamilyController.inviteMember);
+familyRoutes.post('/members/invite', authenticateJWT, FamilyController.inviteMember);
 
 /**
- * PUT /families/:familyId/members/role
- * Update member role and permissions
- * @body { memberId, role, can_view, can_edit, can_delete, can_invite }
+ * Update a family member's role and permissions
+ *
+ * Allows family owners and admins to modify another member's role and specific
+ * permissions. Changes can include updating the role and individual permission flags.
+ * Family owners cannot have their permissions modified through this method.
+ *
+ * @route PUT /api/families/members/role
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family containing the member
+ * @param {Object} req.body
+ * @param {string} req.body.memberId - UUID of the member to update
+ * @param {string} [req.body.role] - New role for the member
+ * @param {boolean} [req.body.can_view] - View permission flag
+ * @param {boolean} [req.body.can_edit] - Edit permission flag
+ * @param {boolean} [req.body.can_delete] - Delete permission flag
+ * @param {boolean} [req.body.can_invite] - Invite permission flag
+ * @returns {Object} 200 - Success response with updated member data
+ * @returns {Object} 403 - Forbidden (not owner/admin or trying to update owner)
+ * @returns {Object} 404 - Member not found
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * PUT /api/families/members/role
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "memberId": "member-uuid",
+ *   "role": "admin",
+ *   "can_edit": true,
+ *   "can_invite": true
+ * }
  */
-familyRoutes.put('/:familyId/members/role', authenticateJWT, FamilyController.updateMemberRole);
+familyRoutes.put('/members/role', authenticateJWT, FamilyController.updateMemberRole);
 
 /**
- * DELETE /families/:familyId/members
- * Remove member from family
- * @body { memberId }
+ * Remove a member from a family group
+ *
+ * Allows authorized family members to remove another member from the family.
+ * The member's status is set to inactive, removing their access while preserving
+ * historical data. Family owners cannot be removed through this method.
+ *
+ * @route DELETE /api/families/members
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family to remove member from
+ * @param {Object} req.body
+ * @param {string} req.body.memberId - UUID of the member to remove
+ * @returns {Object} 200 - Success response confirming removal
+ * @returns {Object} 403 - Forbidden (insufficient permissions)
+ * @returns {Object} 400 - Bad request (removing self or owner)
+ * @returns {Object} 404 - Member not found
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * DELETE /api/families/members
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "memberId": "member-uuid"
+ * }
  */
-familyRoutes.delete('/:familyId/members', authenticateJWT, FamilyController.removeMember);
+familyRoutes.delete('/members', authenticateJWT, FamilyController.removeMember);
 
 /**
- * POST /families/:familyId/leave
- * Leave family (for non-owner members)
+ * Allow a non-owner member to leave a family group
+ *
+ * Allows authenticated users who are not family owners to voluntarily leave a family.
+ * Their membership status is set to inactive, removing their access while preserving
+ * historical data. Family owners must transfer ownership or delete the family instead.
+ *
+ * @route POST /api/families/leave
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family to leave
+ * @returns {Object} 200 - Success response confirming departure
+ * @returns {Object} 400 - Bad request (owner trying to leave)
+ * @returns {Object} 404 - Not a member of the family
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * POST /api/families/leave
+ * Authorization: Bearer <jwt_token>
  */
-familyRoutes.post('/:familyId/leave', authenticateJWT, FamilyController.leaveFamily);
+familyRoutes.post('/leave', authenticateJWT, FamilyController.leaveFamily);
 
 // ============================================================================
 // Family Invitations Routes
 // ============================================================================
 
 /**
- * GET /families/invitations/pending
- * Get pending family invitations for authenticated user
+ * Get all pending family invitations for the authenticated user
+ *
+ * Retrieves a list of all pending family invitations sent to the authenticated
+ * user's email. Only invitations that are still pending and have not expired
+ * are included. Results are ordered by creation date (newest first).
+ *
+ * @route GET /api/families/invitations/pending
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @returns {Object} 200 - Success response with array of pending invitations
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * GET /api/families/invitations/pending
+ * Authorization: Bearer <jwt_token>
  */
 familyRoutes.get('/invitations/pending', authenticateJWT, FamilyController.getPendingInvitations);
 
 /**
- * POST /families/invitations/:invitationId/accept
- * Accept family invitation
+ * Accept a pending family invitation
+ *
+ * Allows an authenticated user to accept a family invitation sent to their email.
+ * Upon acceptance, the user becomes an active family member with the specified role
+ * and permissions. The invitation status is updated to 'accepted'.
+ *
+ * @route POST /api/families/invitations/:invitationId/accept
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.invitationId - UUID of the invitation to accept
+ * @returns {Object} 200 - Success response with acceptance confirmation
+ * @returns {Object} 403 - Forbidden (invitation not for this user)
+ * @returns {Object} 404 - Invitation not found
+ * @returns {Object} 400 - Bad request (invitation not pending or expired)
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * POST /api/families/invitations/accept
+ * Authorization: Bearer <jwt_token>
  */
 familyRoutes.post(
   '/invitations/:invitationId/accept',
@@ -101,8 +326,24 @@ familyRoutes.post(
 );
 
 /**
- * POST /families/invitations/:invitationId/reject
- * Reject family invitation
+ * Reject a pending family invitation
+ *
+ * Allows an authenticated user to reject a family invitation sent to their email.
+ * The invitation status is updated to 'rejected' and no further action is taken.
+ * Rejected invitations cannot be accepted later.
+ *
+ * @route POST /api/families/invitations/:invitationId/reject
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.invitationId - UUID of the invitation to reject
+ * @returns {Object} 200 - Success response confirming rejection
+ * @returns {Object} 403 - Forbidden (invitation not for this user)
+ * @returns {Object} 404 - Invitation not found
+ * @returns {Object} 400 - Bad request (invitation not pending)
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * POST /api/families/invitations/reject
+ * Authorization: Bearer <jwt_token>
  */
 familyRoutes.post(
   '/invitations/:invitationId/reject',
@@ -115,22 +356,75 @@ familyRoutes.post(
 // ============================================================================
 
 /**
- * POST /families/access/grant
- * Grant access to another user
- * @body { targetUserId, accessType, canViewAssets, canEditAssets, canDeleteAssets, accessUntil }
+ * Grant access permissions to another user for family-related operations
+ *
+ * Allows authenticated users to grant specific access permissions to other users
+ * for viewing, editing, or deleting family assets. If access already exists, it will
+ * be updated; otherwise, a new access record is created. Access can be time-limited.
+ *
+ * @route POST /api/families/access/grant
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {Object} req.body
+ * @param {string} req.body.targetUserId - UUID of the user to grant access to
+ * @param {string} req.body.accessType - Type of access being granted
+ * @param {boolean} req.body.canViewAssets - Permission to view assets
+ * @param {boolean} req.body.canEditAssets - Permission to edit assets
+ * @param {boolean} req.body.canDeleteAssets - Permission to delete assets
+ * @param {string} [req.body.accessUntil] - Optional expiration date (ISO string)
+ * @returns {Object} 201 - Success response with access grant data
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * POST /api/families/access/grant
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "targetUserId": "user-uuid",
+ *   "accessType": "full",
+ *   "canViewAssets": true,
+ *   "canEditAssets": true,
+ *   "canDeleteAssets": false,
+ *   "accessUntil": "2024-12-31T23:59:59Z"
+ * }
  */
 familyRoutes.post('/access/grant', authenticateJWT, FamilyController.grantAccess);
 
 /**
- * GET /families/access/list
- * Get user's access grants
+ * Retrieve list of access grants made by the authenticated user
+ *
+ * Fetches all active access permissions that the authenticated user has granted
+ * to other users, including details about the granted users and their permissions.
+ *
+ * @route GET /api/families/access/list
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @returns {Object} 200 - Success response with array of access grants
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * GET /api/families/access/list
+ * Authorization: Bearer <jwt_token>
  */
 familyRoutes.get('/access/list', authenticateJWT, FamilyController.getUserAccess);
 
 /**
- * POST /families/access/revoke
- * Revoke access from user
- * @body { accessId }
+ * Revoke previously granted access permissions
+ *
+ * Allows authenticated users to revoke access permissions they have previously
+ * granted to other users. The access record is marked as inactive.
+ *
+ * @route POST /api/families/access/revoke
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {Object} req.body
+ * @param {string} req.body.accessId - UUID of the access grant to revoke
+ * @returns {Object} 200 - Success response confirming revocation
+ * @returns {Object} 403 - Forbidden (not the granter of the access)
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * POST /api/families/access/revoke
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "accessId": "access-uuid"
+ * }
  */
 familyRoutes.post('/access/revoke', authenticateJWT, FamilyController.revokeAccess);
 
@@ -139,10 +433,38 @@ familyRoutes.post('/access/revoke', authenticateJWT, FamilyController.revokeAcce
 // ============================================================================
 
 /**
- * PUT /families/:familyId/settings
- * Update family settings
- * @body { canShareAssets, canViewOthers, requireApproval, currency, etc. }
+ * Update family-wide settings and preferences
+ *
+ * Allows authorized family members (owner or those with edit permissions)
+ * to modify family settings such as sharing preferences, approval requirements,
+ * currency, financial year start, and transaction notifications.
+ *
+ * @route PUT /api/families/settings
+ * @middleware authenticateJWT - Requires valid JWT token
+ * @param {string} req.params.familyId - UUID of the family to update settings for
+ * @param {Object} req.body
+ * @param {boolean} [req.body.canShareAssets] - Asset sharing permission
+ * @param {boolean} [req.body.canViewOthers] - View others' data permission
+ * @param {boolean} [req.body.requireApproval] - Transaction approval requirement
+ * @param {string} [req.body.currency] - Currency code (e.g., 'INR', 'USD')
+ * @param {string} [req.body.financialYearStart] - Financial year start (MM-DD)
+ * @param {boolean} [req.body.notifyLargeTransactions] - Large transaction notifications
+ * @param {number} [req.body.largeTransactionThreshold] - Notification threshold amount
+ * @returns {Object} 200 - Success response with updated settings
+ * @returns {Object} 403 - Forbidden (insufficient permissions)
+ * @returns {Object} 500 - Server error
+ *
+ * @example
+ * PUT /api/families/settings
+ * Authorization: Bearer <jwt_token>
+ * {
+ *   "canShareAssets": true,
+ *   "requireApproval": true,
+ *   "currency": "USD",
+ *   "notifyLargeTransactions": true,
+ *   "largeTransactionThreshold": 50000
+ * }
  */
-familyRoutes.put('/:familyId/settings', authenticateJWT, FamilyController.updateSettings);
+familyRoutes.put('/settings', authenticateJWT, FamilyController.updateSettings);
 
 export default familyRoutes;

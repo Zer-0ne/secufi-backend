@@ -3,6 +3,7 @@ import { PrismaClient, User } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { Response } from 'express';
 import JWTService from './jwt.service';
+import { TempUserData } from '@/middlewares/temp-user.middleware';
 
 export class UserService {
   private prisma: PrismaClient;
@@ -14,6 +15,7 @@ export class UserService {
   /**
    * Create user or return existing user
    */
+
   async createOrGetUser(data: {
     email: string;
     name?: string;
@@ -23,7 +25,9 @@ export class UserService {
     google_id?: string;
     google_email?: string;
     profile_picture?: string;
-  }): Promise<{ user: User; isNewUser: boolean }> {
+    // ✅ NEW: Accept temp user data
+    tempUserData?: TempUserData;
+  }): Promise<{ user: User; isNewUser: boolean; hadTempData: boolean }> {
     try {
       // Normalize email
       const email = data.email.toLowerCase().trim();
@@ -31,22 +35,28 @@ export class UserService {
       // Check if user exists by email
       let user = await this.prisma.user.findUnique({
         where: { email },
+        include: {
+          owned_family: true,
+        },
       });
 
       if (user) {
         console.log(`✓ User already exists: ${email}`);
-        return { user, isNewUser: false };
+        return { user, isNewUser: false, hadTempData: false };
       }
 
       // Check if user exists by google_id
       if (data.google_id) {
         user = await this.prisma.user.findUnique({
           where: { google_id: data.google_id },
+          include: {
+            owned_family: true,
+          },
         });
 
         if (user) {
           console.log(`✓ User already exists with google_id: ${data.google_id}`);
-          return { user, isNewUser: false };
+          return { user, isNewUser: false, hadTempData: false };
         }
       }
 
@@ -54,11 +64,14 @@ export class UserService {
       if (data.phone) {
         user = await this.prisma.user.findUnique({
           where: { phone: data.phone },
+          include: {
+            owned_family: true,
+          },
         });
 
         if (user) {
           console.log(`✓ User already exists with phone: ${data.phone}`);
-          return { user, isNewUser: false };
+          return { user, isNewUser: false, hadTempData: false };
         }
       }
 
@@ -68,30 +81,203 @@ export class UserService {
         hashedPassword = await bcrypt.hash(data.password, 10);
       }
 
-      // Create new user
-      const newUser = await this.prisma.user.create({
-        data: {
-          email,
-          name: data.name || null,
-          password: hashedPassword,
-          user_type: data.user_type || 'parent',
-          phone: data.phone || null,
-          google_id: data.google_id || null,
-          google_email: data.google_email || null,
-          profile_picture: data.profile_picture || null,
-          is_google_user: !!data.google_id,
-          role: 'user',
-          is_active: true,
-        },
+      // ✅ Merge temp user data with provided data
+      const finalName = data.name || data.tempUserData?.name || null;
+      const finalPhone = data.phone || data.tempUserData?.phone || null;
+
+      // ✅ Create new user and their ONE family in a transaction
+      const result = await this.prisma.$transaction(async (tx) => {
+        // Create new user
+        const newUser = await tx.user.create({
+          data: {
+            email,
+            name: finalName,
+            password: hashedPassword,
+            user_type: data.user_type || 'parent',
+            phone: finalPhone,
+            google_id: data.google_id || null,
+            google_email: data.google_email || null,
+            profile_picture: data.profile_picture || null,
+            is_google_user: !!data.google_id,
+            role: 'user',
+            is_active: true,
+          },
+        });
+
+        // Create the user's ONE family with them as owner
+        const familyName = finalName
+          ? `${finalName}'s Family`
+          : `${email.split('@')[0]}'s Family`;
+
+        const newFamily = await tx.family.create({
+          data: {
+            name: familyName,
+            description: 'Personal family group',
+            owner_id: newUser.id,
+          },
+        });
+
+        // Create family member entry for owner with full permissions
+        await tx.familyMember.create({
+          data: {
+            family_id: newFamily.id,
+            user_id: newUser.id,
+            role: 'owner',
+            can_view: true,
+            can_edit: true,
+            can_delete: true,
+            can_invite: true,
+            is_active: true,
+          },
+        });
+
+        // Create default family settings
+        await tx.familySettings.create({
+          data: {
+            family_id: newFamily.id,
+            can_share_assets: true,
+            can_view_others: true,
+            require_approval: false,
+            currency: 'INR',
+            financial_year_start: '01-04',
+            notify_large_transactions: true,
+            large_transaction_threshold: 100000,
+          },
+        });
+
+        // Create default roles
+        const defaultRoles = [
+          {
+            name: 'owner',
+            description: 'Full access to all family features',
+            permissions: {
+              view_assets: true,
+              create_assets: true,
+              edit_assets: true,
+              delete_assets: true,
+              manage_members: true,
+              approve_transactions: true,
+              export_data: true,
+            },
+          },
+          {
+            name: 'admin',
+            description: 'Manage family members and assets',
+            permissions: {
+              view_assets: true,
+              create_assets: true,
+              edit_assets: true,
+              delete_assets: false,
+              manage_members: true,
+              approve_transactions: true,
+              export_data: true,
+            },
+          },
+          {
+            name: 'member',
+            description: 'View and create assets',
+            permissions: {
+              view_assets: true,
+              create_assets: true,
+              edit_assets: false,
+              delete_assets: false,
+              manage_members: false,
+              approve_transactions: false,
+              export_data: false,
+            },
+          },
+          {
+            name: 'viewer',
+            description: 'View-only access',
+            permissions: {
+              view_assets: true,
+              create_assets: false,
+              edit_assets: false,
+              delete_assets: false,
+              manage_members: false,
+              approve_transactions: false,
+              export_data: false,
+            },
+          },
+        ];
+
+        for (const role of defaultRoles) {
+          await tx.familyRole.create({
+            data: {
+              family_id: newFamily.id,
+              name: role.name,
+              description: role.description,
+              permissions: role.permissions,
+              is_default: true,
+            },
+          });
+        }
+
+        // ✅ NEW: If they were invited to another family, add them as member
+        if (data.tempUserData?.invited_by_family_id) {
+          const invitedFamilyId = data.tempUserData.invited_by_family_id;
+          const invitedRole = data.tempUserData.invited_role || 'member';
+
+          console.log(`✓ Adding user to invited family: ${invitedFamilyId}`);
+
+          // Add as family member
+          await tx.familyMember.create({
+            data: {
+              family_id: invitedFamilyId,
+              user_id: newUser.id,
+              role: invitedRole,
+              can_view: true,
+              can_edit: invitedRole === 'admin' || invitedRole === 'owner',
+              can_delete: invitedRole === 'owner',
+              can_invite: invitedRole === 'admin' || invitedRole === 'owner',
+              is_active: true,
+            },
+          });
+
+          // ✅ Update invitation status if invitation_id exists
+          if (data.tempUserData.invitation_id) {
+            await tx.familyInvitation.update({
+              where: { id: data.tempUserData.invitation_id },
+              data: {
+                status: 'accepted',
+                accepted_at: new Date(),
+                invited_user_id: newUser.id,
+              },
+            });
+          }
+        }
+
+        console.log(`✅ New user created: ${email}`);
+        console.log(`✅ Family created: ${newFamily.id} (${familyName})`);
+
+        // Return user with their family included
+        return await tx.user.findUniqueOrThrow({
+          where: { id: newUser.id },
+          include: {
+            owned_family: true,
+          },
+        });
       });
 
-      console.log(`✓ New user created: ${email}`);
-      return { user: newUser, isNewUser: true };
+      return {
+        user: result,
+        isNewUser: true,
+        hadTempData: !!data.tempUserData
+      };
     } catch (error) {
-      console.error('Error in createOrGetUser:', error);
+      console.error('❌ Error in createOrGetUser:', error);
+
+      if (error instanceof Error && error.message.includes('Unique constraint')) {
+        throw new Error('User already has a family. Each user can only own one family.');
+      }
+
       throw new Error('Failed to create or get user');
     }
   }
+
+
+
+
 
   /**
    * Get user by ID
