@@ -11,6 +11,8 @@ import {
   FamilySettingsRequest,
 } from '@/config/interfaces';
 import { prisma } from '@/config/database';
+import { getClientIP, getClientOrigin } from '@/config/request.helper';
+import emailService from '@/services/email.service';
 
 /**
  * FamilyController - Handles all family-related operations in the application
@@ -740,10 +742,10 @@ export class FamilyController {
               assetsSharedWithMe: {
                 select: {
                   id: true,
-                  asset_id:true
+                  asset_id: true
                 }
               }
-              
+
             },
           },
         },
@@ -985,7 +987,6 @@ export class FamilyController {
               expires_at: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
             },
           });
-
           console.log(`✅ Created/Updated temp user for ${email}`);
         } catch (tempError) {
           console.error('⚠️ Error creating temp user:', tempError);
@@ -995,6 +996,34 @@ export class FamilyController {
       console.log(`✅ Invitation sent to ${email} for family ${familyId} with role: ${requestedRole}`);
 
       // TODO: Send invitation email
+      // ✅ Get origin and construct accept link
+      const origin = getClientOrigin(req);
+      const clientIP = getClientIP(req);
+
+      // Construct accept link
+      const acceptLink = invitedUser
+        ? `${origin}/api/family/invitations/${invitation.id}/accept/${invitedUser.id}`
+        : `${origin}/register?invitation=${invitation.id}&email=${encodeURIComponent(email)}`;
+
+      console.log(`📧 Sending invitation email to: ${email}`);
+      console.log(`🔗 Accept link: ${acceptLink}`);
+      console.log(`🌐 Client IP: ${clientIP}`);
+
+      // ✅ Send invitation email
+      try {
+        await emailService.sendFamilyInvitation({
+          recipientName: name || email,
+          inviterName: family.name || 'Family Admin',
+          familyName: family.name,
+          role: requestedRole,
+          acceptLink: acceptLink,
+        });
+
+        console.log(`✅ Invitation email sent successfully to ${email}`);
+      } catch (emailError) {
+        console.error('❌ Error sending invitation email:', emailError);
+        // Don't fail the entire request if email fails
+      }
 
       return res.status(201).json({
         success: true,
@@ -1376,7 +1405,7 @@ export class FamilyController {
     try {
       const familyId = req.params.familyId;
       const userId = req.user?.userId!;
-      const { memberId } = req.body;
+      const { memberId } = req.params || req.body;
 
       // Verify user has permission (owner or admin with can_delete)
       const userMembership = await prisma.familyMember.findUnique({

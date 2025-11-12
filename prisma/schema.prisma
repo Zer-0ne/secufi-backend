@@ -46,6 +46,7 @@ model User {
   asset_preference Json?   @default("{}")
   customer_id      String? @db.VarChar(50)
   account_number   String? @db.VarChar(50)
+  crn_number       String?
 
   // Family Relations
   family_memberships FamilyMember[] @relation("UserFamilies")
@@ -60,6 +61,10 @@ model User {
   // Audit fields
   created_at DateTime @default(now())
   updated_at DateTime @updatedAt
+
+  // processing date details
+  expire_email_processing DateTime?
+  expire_sms_processing   DateTime?
 
   // Relations
   transactions            Transaction[]
@@ -565,8 +570,11 @@ model Asset {
   user User @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   // issue 
-  issues       String[]      @default([])
-  sharedAssets SharedAsset[]
+  issues String[] @default([])
+
+  // required feilds for this assests 
+  required_fields String[]      @default([])
+  sharedAssets    SharedAsset[]
 
   @@index([user_id])
   @@index([type])

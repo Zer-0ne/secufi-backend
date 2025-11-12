@@ -62,7 +62,7 @@ userRouter.post('/', checkTempUser, async (req: Request, res: Response) => {
       google_email,
       profile_picture,
       tempUserData, // ✅ Pass temp user data
-    });
+    } as any);
 
     // ✅ If user was created from temp data, delete temp record
     if (isNewUser && hadTempData) {
@@ -143,29 +143,30 @@ userRouter.put('/kyc', authenticateJWT, async (req: AuthenticatedRequest, res: R
 
     }
     const { id: userId } = user as User;
-    const { phone, address, date_of_birth, pan_number } = req.body;
+    const { phone, address, date_of_birth, pan_number,name } = req.body;
     const { wants_to_update_details } = req.query;
     if (!phone || !date_of_birth || !pan_number) {
       return res.status(400).json({ success: false, message: 'phone, pan number, address and date_of_birth are required' });
 
     }
 
-    if (!wants_to_update_details && (user as User).is_verified) {
+    // if (!wants_to_update_details && (user as User).is_verified) {
 
-      // this will change to status(400) and success is false in future now this is for testing purpose
-      return res.status(200).json({
-        success: true, message: 'You are already varified, Do you want update your details?',
-        action: {
-          redirect: '/api/users/kyc?wants_to_update_details=true',
-        }
-      });
-    }
+    //   // this will change to status(400) and success is false in future now this is for testing purpose
+    //   return res.status(200).json({
+    //     success: true, message: 'You are already varified, Do you want update your details?',
+    //     action: {
+    //       redirect: '/api/users/kyc?wants_to_update_details=true',
+    //     }
+    //   });
+    // }
 
     // console.log(date_of_birth.toISOString().split("T")[0])
 
     const updatedUser = await userService.updateUser(userId.toString(), {
       phone,
       address,
+      name,
       date_of_birth: new Date(date_of_birth),
       is_verified: true,
       pan_number,

@@ -37,9 +37,10 @@ const googleService = new GoogleService(
  * POST /api/email-processing/analyze/:userId
  * Analyze emails with attachments
  */
-router.post('/analyze/:userId', async (req: Request, res: Response) => {
+router.post('/analyze', authenticateJWT, async (req: AuthenticatedRequest, res: Response) => {
     try {
-        const { userId } = req.params;
+        // const { userId } = req.params;
+        const userId = req.user?.userId
         const { limit } = req.body;
 
         if (!userId) {
@@ -53,6 +54,42 @@ router.post('/analyze/:userId', async (req: Request, res: Response) => {
         console.log(`🚀 Starting financial email analysis for user: ${userId}`);
 
         googleService.setUserId(userId);
+        // ✅ 1️⃣ Fetch user and expiry field
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { expire_email_processing: true },
+        });
+
+        if (!user) {
+            res.status(404).json({
+                success: false,
+                message: 'User not found',
+            });
+            return;
+        }
+
+        const now = new Date();
+        const expiry = user.expire_email_processing
+            ? new Date(user.expire_email_processing)
+            : null;
+
+        // ✅ 2️⃣ If expiry exists and is in the future → deny processing
+        if (expiry && expiry > now) {
+            const remainingDays = Math.ceil(
+                (expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+            );
+            res.status(200).json({
+                success: false,
+                message: `Email analysis was already processed recently. Please try again after ${remainingDays} days.`,
+            });
+            return
+        }
+
+        // ✅ 3️⃣ Set new expiry (90 days from now)
+        const ninetyDays = 90 * 24 * 60 * 60 * 1000;
+        const newExpiry = new Date(now.getTime() + ninetyDays);
+
+        console.log(`🕒 Updated expire_email_processing to ${newExpiry.toISOString()}`);
         const loaded = await googleService.loadCredentialsFromDatabase(userId);
 
         if (!loaded) {
@@ -158,6 +195,12 @@ router.post('/analyze/:userId', async (req: Request, res: Response) => {
         }
 
         const processed = results.filter((r) => r.processed).length;
+
+        // update the expiry date in user schema
+        await prisma.user.update({
+            where: { id: userId },
+            data: { expire_email_processing: newExpiry },
+        });
 
         res.json({
             success: true,

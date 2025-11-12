@@ -39,6 +39,16 @@ interface EnhancedFinancialData {
   folioNumber?: string;
   fundName?: string;
 
+  extractedUserFields?: {
+    name?: string;
+    phone?: string;
+    email?: string;
+    address?: string;
+    pan_number?: string;
+    aadhar_number?: string;
+    date_of_birth?: string;
+  };
+
   // Financial metadata
   financialMetadata: {
     totalValue?: number;
@@ -97,6 +107,7 @@ interface AnalysisResult {
   keyPoints?: string[];
   summary?: string;
   issues: string[]
+  required_fields: string[]
 }
 
 export class AIService {
@@ -402,6 +413,81 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
   }
 
   /**
+ * ✅ NEW METHOD: Compare extracted user fields with existing user data
+ * Returns array of missing field names
+ */
+  private async checkMissingUserFields(
+    userId: string,
+    extractedFields: {
+      name?: string;
+      phone?: string;
+      email?: string;
+      address?: string;
+      pan_number?: string;
+      aadhar_number?: string;
+      date_of_birth?: string;
+    }
+  ): Promise<string[]> {
+    try {
+      // Fetch current user data
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: {
+          name: true,
+          phone: true,
+          email: true,
+          address: true,
+          pan_number: true,
+          aadhar_number: true,
+          date_of_birth: true,
+        },
+      });
+
+      if (!user) {
+        console.warn(`User ${userId} not found`);
+        return [];
+      }
+
+      const missingFields: string[] = [];
+
+      // Define field mappings
+      const fieldMappings: Array<{
+        extractedKey: keyof typeof extractedFields;
+        userKey: keyof typeof user;
+        displayName: string;
+      }> = [
+          { extractedKey: 'name', userKey: 'name', displayName: 'name' },
+          { extractedKey: 'phone', userKey: 'phone', displayName: 'phone' },
+          { extractedKey: 'email', userKey: 'email', displayName: 'email' },
+          { extractedKey: 'address', userKey: 'address', displayName: 'address' },
+          { extractedKey: 'pan_number', userKey: 'pan_number', displayName: 'pan_number' },
+          { extractedKey: 'aadhar_number', userKey: 'aadhar_number', displayName: 'aadhar_number' },
+          { extractedKey: 'date_of_birth', userKey: 'date_of_birth', displayName: 'date_of_birth' },
+        ];
+
+      // Check each field
+      for (const mapping of fieldMappings) {
+        const extractedValue = extractedFields[mapping.extractedKey];
+        const userValue = user[mapping.userKey];
+
+        // If extracted field has value but user field is empty/null
+        if (extractedValue && !userValue) {
+          missingFields.push(mapping.displayName);
+          console.log(
+            `📋 Missing field detected: ${mapping.displayName} = "${extractedValue}" (not in user profile)`
+          );
+        }
+      }
+
+      return missingFields;
+    } catch (error) {
+      console.error('Error checking missing user fields:', error);
+      return [];
+    }
+  }
+
+
+  /**
    * Safe wrapper for classification with local filtering
    */
   // async classifyEmailSubjectsWithFiltering(
@@ -438,7 +524,8 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
    * Analyze financial email and extract transaction data
    */
   async analyzeFinancialEmail(
-    data: FinancialAnalysisRequest
+    data: FinancialAnalysisRequest,
+    userId: string
   ): Promise<AnalysisResult> {
     try {
       const prompt = `You are an expert financial document analyzer. Analyze this email and extract all financial information with proper categorization.
@@ -652,6 +739,16 @@ Example 3 - Mutual Fund Statement:
     "returnsPercentage": 25.0,
     "appreciationRate": 25.0
   },
+   "extractedUserFields": {
+    "name": "customer name if found",
+    "phone": "phone number if found",
+    "email": "email if found",
+    "address": "address if found",
+    "pan_number": "PAN if found",
+    "aadhar_number": "Aadhar if found",
+    "date_of_birth": "DOB if found"
+    "crn_number":"CRN if found"
+  },
   "keyPoints": [
     "Current investment value: ₹2,50,000",
     "Total returns: 25% (₹50,000 gain)",
@@ -690,6 +787,8 @@ Example 4 - Home Loan EMI:
   ]
 }
 
+**IMPORTANT**: In "extractedUserFields", extract ANY personal information found in the email, attachments, or content that relates to the user (name, phone, email, address, PAN, Aadhar, DOB, etc.). If not found, set to null.
+
 Now analyze the provided email and return structured JSON:`;
 
       const response = await this.callOpenAI(prompt);
@@ -714,6 +813,10 @@ Now analyze the provided email and return structured JSON:`;
 
       const extracted: EnhancedFinancialData = JSON.parse(jsonMatch[0]);
       const issues = await this.validateExtractedData(extracted, data.attachmentContents);;
+      const requiredFields = await this.checkMissingUserFields(
+        userId,
+        extracted.extractedUserFields || {}
+      );
 
       if (issues.length > 0) {
         console.log('⚠️ Validation Issues Found:', issues);
@@ -762,7 +865,8 @@ Now analyze the provided email and return structured JSON:`;
         keyPoints: extracted.keyPoints || [],
         summary: this.generateSmartSummary(extracted),
         attachmentAnalyses,
-        issues
+        issues,
+        required_fields: requiredFields,
       };
     } catch (error) {
       console.error('Error analyzing financial email:', error);

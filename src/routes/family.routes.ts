@@ -15,8 +15,8 @@
  * @module FamilyRoutes
  */
 
-import { Router } from 'express';
-import { authenticateJWT } from '@/middlewares/auth.middleware';
+import { Router, Response, Request } from 'express';
+import { AuthenticatedRequest, authenticateJWT } from '@/middlewares/auth.middleware';
 import { FamilyController } from '@/controllers/family.controller';
 
 const familyRoutes = Router();
@@ -236,7 +236,7 @@ familyRoutes.put('/members/role', authenticateJWT, FamilyController.updateMember
  * The member's status is set to inactive, removing their access while preserving
  * historical data. Family owners cannot be removed through this method.
  *
- * @route DELETE /api/families/members
+ * @route DELETE /api/families/members/:memberId
  * @middleware authenticateJWT - Requires valid JWT token
  * @param {string} req.params.familyId - UUID of the family to remove member from
  * @param {Object} req.body
@@ -248,13 +248,10 @@ familyRoutes.put('/members/role', authenticateJWT, FamilyController.updateMember
  * @returns {Object} 500 - Server error
  *
  * @example
- * DELETE /api/families/members
+ * DELETE /api/families/members/:memberId
  * Authorization: Bearer <jwt_token>
- * {
- *   "memberId": "member-uuid"
- * }
  */
-familyRoutes.delete('/members', authenticateJWT, FamilyController.removeMember);
+familyRoutes.delete('/members/:memberId', authenticateJWT, FamilyController.removeMember);
 
 /**
  * Allow a non-owner member to leave a family group
@@ -324,6 +321,27 @@ familyRoutes.post(
   authenticateJWT,
   FamilyController.acceptInvitation
 );
+
+
+// this is for mail accept 
+familyRoutes.get('/invitations/:invitationId/accept/:userId', async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+  try {
+    const { invitationId, userId } = req.params
+    if (!invitationId || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invitation ID and User ID are required',
+      });
+    }
+    req.user = { userId }
+    return await FamilyController.acceptInvitation as any
+  } catch (error) {
+    console.log('Error in iinvitation with mail :: ', (error as Error).message)
+    return res.status(500).json({
+      message: (process.env.NODE_ENV) ? (error as Error).message : 'Something went wrong!'
+    })
+  }
+})
 
 /**
  * Reject a pending family invitation

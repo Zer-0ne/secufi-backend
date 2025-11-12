@@ -583,10 +583,18 @@ export class AssetSharingController {
                 });
             }
 
-            await prisma.sharedAsset.update({
-                where: { id: sharedAssetId },
-                data: { is_active: false },
-            });
+            // use this in future when we working on activity logs
+            // await prisma.sharedAsset.update({
+            //     where: { id: sharedAssetId },
+            //     data: { is_active: false },
+            // });
+
+            // remove this in future when we working on activity logs
+            await prisma.sharedAsset.delete({
+                where: {
+                    id: sharedAssetId
+                }
+            })
 
             console.log(`✅ Asset sharing ${sharedAssetId} revoked`);
 

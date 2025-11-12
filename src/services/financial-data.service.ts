@@ -530,7 +530,7 @@ export class FinancialDataService {
         sender: emailData.from,
         attachmentContents: emailData.attachmentContents,
         documentType: this.guessDocumentType(emailData.subject),
-      });
+      }, userId);
 
       console.log('📊 Email Analysis:', emailAnalysis);
 
@@ -552,6 +552,7 @@ export class FinancialDataService {
           });
 
           const extracted = emailAnalysis.extractedData;
+          console.log('extracted data :: ',emailAnalysis.extractedData)
 
           // console.log(`Extracted Data :: ${JSON.stringify(extracted)}`)
 
@@ -637,6 +638,7 @@ export class FinancialDataService {
 
               email_id: emailData.emailId,
               issues: emailAnalysis.issues || [],
+              required_fields: emailAnalysis.requiredFields || [],
             },
           });
           assetIds.push(assetRecord.id);
