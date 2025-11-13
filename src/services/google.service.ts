@@ -310,12 +310,12 @@ export class GoogleService {
                 await this.refreshAccessToken();
             }
 
-            const response = await this.gmail.users.messages.list({
+            const response = await (this.gmail.users.messages as any).list({
                 userId: 'me',
                 maxResults,
                 pageToken,
                 format: 'full',
-            });
+            }) as any;
 
             
             const messages = response.data.messages || [];
@@ -323,7 +323,7 @@ export class GoogleService {
             
             // console.log("response :: ",messages,totalMessages)
             // Fetch full message details
-            const emailPromises = messages.map((msg) =>
+            const emailPromises = messages.map((msg:any) =>
                 this.getEmailById(msg.id || '')
             );
 
@@ -519,7 +519,7 @@ async getEmailById(emailId: string): Promise<EmailMessage | null> {
 
             this.credentials = null;
             this.gmail = null;
-            this.oauth2Client.revokeAllCredentials();
+            (this.oauth2Client as any).revokeAllCredentials();
 
             await this.prisma.googleCredential.deleteMany({
                 where: { user_id: this.userId },

@@ -15,6 +15,11 @@ export interface CreateUserResponse {
   user?:User;
   isNewUser?: boolean;
   error?: string;
+  tokens:{
+    accessToken:string;
+    refreshToken:string;
+  }
+  wasInvited:boolean
 }
 
 export interface GetUserResponse {

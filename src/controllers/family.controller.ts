@@ -13,6 +13,7 @@ import {
 import { prisma } from '@/config/database';
 import { getClientIP, getClientOrigin } from '@/config/request.helper';
 import emailService from '@/services/email.service';
+import JWTService from '@/services/jwt.service';
 
 /**
  * FamilyController - Handles all family-related operations in the application
@@ -997,22 +998,26 @@ export class FamilyController {
 
       // TODO: Send invitation email
       // ✅ Get origin and construct accept link
-      const origin = getClientOrigin(req);
+      // const origin = getClientOrigin(req);
+
+      // this is for server origin
+      const origin = `${req.protocol}://${req.get('host')}`;
       const clientIP = getClientIP(req);
 
       // Construct accept link
       const acceptLink = invitedUser
-        ? `${origin}/api/family/invitations/${invitation.id}/accept/${invitedUser.id}`
-        : `${origin}/register?invitation=${invitation.id}&email=${encodeURIComponent(email)}`;
+        ? `${process.env.NODE_ENV === 'development' ? process.env.SYSTEM_LOCAL_URL : origin}/api/family/invitations/${invitation.id}/accept/${invitedUser.id}/${await JWTService.signAccessToken({ isUsed: false, userId }, '7d')}`
+        : `${process.env.NODE_ENV === 'development' ? process.env.SYSTEM_LOCAL_URL : origin}/api/users/register-with-invitation?invitation=${invitation.id}&email=${encodeURIComponent(email)}&token=${encodeURIComponent(JWTService.signAccessToken({ isUsed: false, userId:''}))}`;
 
       console.log(`📧 Sending invitation email to: ${email}`);
       console.log(`🔗 Accept link: ${acceptLink}`);
       console.log(`🌐 Client IP: ${clientIP}`);
 
       // ✅ Send invitation email
+      // console.log("email :: ",email)
       try {
         await emailService.sendFamilyInvitation({
-          recipientName: name || email,
+          recipientName: email,
           inviterName: family.name || 'Family Admin',
           familyName: family.name,
           role: requestedRole,
@@ -1457,13 +1462,18 @@ export class FamilyController {
         } as ApiResponse<null>);
       }
 
-      await prisma.familyMember.update({
-        where: { id: memberToRemove.id },
-        data: {
-          is_active: false,
-          updated_at: new Date(),
-        },
-      });
+      // await prisma.familyMember.update({
+      //   where: { id: memberToRemove.id },
+      //   data: {
+      //     is_active: false,
+      //     updated_at: new Date(),
+      //   },
+      // });
+
+
+      await prisma.familyMember.delete({
+        where: { id: memberToRemove.id }
+      })
 
       console.log(`✅ Member ${memberId} removed from family ${familyId}`);
 

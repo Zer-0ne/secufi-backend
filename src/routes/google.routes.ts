@@ -6,6 +6,7 @@ import {
   GoogleAuthResponse,
   ListEmailsResponse,
   GetEmailResponse,
+  EmailMessage,
 } from '@/types/google';
 import { AuthenticatedRequest, authenticateJWT } from '@/middlewares/auth.middleware';
 import JWTService from '@/services/jwt.service';
@@ -347,7 +348,7 @@ googleRouter.get('/callback', async (req: Request, res: Response) => {
     // Decode state to get userId
     let userId: string;
     try {
-      userId = googleService.extractUserIdFromState(stateStr);
+      userId = googleService.extractUserIdFromState(stateStr as string);
       console.log(`✓ Extracted userId from state: ${userId}`);
     } catch (decodeError) {
       console.error('✗ Failed to decode state:', decodeError);
@@ -379,7 +380,7 @@ googleRouter.get('/callback', async (req: Request, res: Response) => {
     console.log(`⟳ Exchanging authorization code for tokens for user: ${userId}`);
     try {
       const credentials = await googleService.exchangeCodeForTokens(
-        codeStr,
+        codeStr as string,
         userId
       );
 
@@ -493,7 +494,7 @@ googleRouter.get('/emails/:userId', async (req: Request, res: Response) => {
     const response: ListEmailsResponse = {
       success: true,
       message: `Retrieved ${result.emails.length} emails`,
-      data: result,
+      data: result as any,
     };
 
     res.json(response);
@@ -593,7 +594,7 @@ googleRouter.get('/emails/:userId/:id', async (req: Request, res: Response) => {
     const response: GetEmailResponse = {
       success: true,
       message: 'Email retrieved successfully',
-      data: email,
+      data: email as EmailMessage,
     };
 
     res.json(response);
@@ -639,7 +640,7 @@ googleRouter.get('/search/:userId', async (req: Request, res: Response) => {
       return;
     }
 
-    const emails = await googleService.searchEmails(query, maxResults);
+    const emails = await googleService.searchEmails(query, maxResults) as EmailMessage[];
 
     const response: ListEmailsResponse = {
       success: true,

@@ -1,7 +1,6 @@
 // services/jwt.service.ts
 
 import jwt, { JwtPayload, SignOptions, VerifyOptions } from 'jsonwebtoken';
-import { ObjectId } from 'mongoose';
 
 /**
  * Interface for JWT payload
@@ -18,7 +17,7 @@ export interface IJWTPayload {
  * Interface for decoded token
  */
 export interface IDecodedToken extends JwtPayload {
-  userId: string | ObjectId;
+  userId: string;
   email?: string;
   role?: string;
   isAdmin?: boolean;

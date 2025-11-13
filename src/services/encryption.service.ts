@@ -11,7 +11,7 @@ interface DecryptedData {
 
 export class EncryptionService {
   private encryptionKey: string;
-  private algorithm = 'aes-256-gcm';
+  private algorithm: crypto.CipherGCMTypes = 'aes-256-gcm';
 
   constructor(encryptionKey?: string) {
     this.encryptionKey =
@@ -41,10 +41,12 @@ export class EncryptionService {
       const iv = crypto.randomBytes(16);
       const key = Buffer.from(this.encryptionKey, 'hex');
 
+      // ✅ FIX: TypeScript now recognizes this as CipherGCM
       const cipher = crypto.createCipheriv(this.algorithm, key, iv);
       let encrypted = cipher.update(data, 'utf8', 'hex');
       encrypted += cipher.final('hex');
 
+      // ✅ FIX: No need for 'as any' - getAuthTag() is now recognized
       const authTag = cipher.getAuthTag();
       const encryptedWithTag = encrypted + authTag.toString('hex');
 
@@ -76,7 +78,10 @@ export class EncryptionService {
         encryptedData.length - 32
       );
 
+      // ✅ FIX: TypeScript now recognizes this as DecipherGCM
       const decipher = crypto.createDecipheriv(this.algorithm, key, ivBuffer);
+      
+      // ✅ FIX: setAuthTag() is now recognized
       decipher.setAuthTag(authTag);
 
       let decrypted = decipher.update(encrypted, 'hex', 'utf8');

@@ -35,7 +35,7 @@ model User {
   last_login      DateTime?
 
   // Contact Information
-  phone         String?   @unique @db.VarChar(15)
+  phone         String?   
   address       String?   @db.Text
   date_of_birth DateTime?
 
@@ -541,6 +541,8 @@ model Asset {
 
   // 🏢 Address & Location
   address String? @db.Text
+
+  crn_number       String?
 
   // 👤 Nominee/Beneficiary Details
   nominee Json? @default("[]") // [{name, relation, percentage}]

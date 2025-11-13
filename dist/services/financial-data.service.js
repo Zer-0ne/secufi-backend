@@ -1,4 +1,3 @@
-import * as fs from 'fs';
 import * as path from 'path';
 /**
  * FinancialDataService
@@ -64,71 +63,211 @@ export class FinancialDataService {
      * ```
      */
     getAssetsByUserId = async (userId) => {
-        return this.prisma.asset.findMany({
+        const data = await this.prisma.asset.findMany({
             where: { user_id: userId },
+            select: {
+                // ✅ Core Identity
+                id: true,
+                user_id: true,
+                name: true,
+                // ✅ Classification
+                type: true,
+                sub_type: true,
+                // ✅ Bank/Financial Account Details
+                account_number: true,
+                ifsc_code: true,
+                branch_name: true,
+                bank_name: true,
+                // ✅ Financial Values
+                balance: true,
+                total_value: true,
+                // ✅ Status & Tracking
+                status: true,
+                last_updated: true,
+                // ✅ Address & Location
+                address: true,
+                // ✅ Nominee/Beneficiary Details
+                nominee: true,
+                // ✅ Insurance/Investment Specific Fields
+                policy_number: true,
+                fund_name: true,
+                folio_number: true,
+                required_fields: true,
+                crn_number: true,
+                // ✅ References
+                transaction_id: true,
+                email_id: true,
+                // ✅ Issues
+                issues: true,
+                // ✅ Timestamps
+                created_at: true,
+                updated_at: true,
+                // ❌ EXCLUDED - Document/Attachment Fields
+                document_type: false,
+                document_metadata: false,
+                file_name: false,
+                file_size: false,
+                mime_type: false,
+                file_content: false,
+            },
         });
-    };
-    /***
-     * Get specific asset by ID for a user
-     * @param {string} assetId - Asset ID to fetch
-     * @param {string} userId - User ID who owns the asset
-     * @return {Promise<Asset | null>} Asset record or null if not found
-     * @example
-     * ```
-     * const asset = await service.getAssetById('asset-456', 'user-123');
-     * if (asset) {
-     *  console.log(`Asset Name: ${asset.name}`);
-     * } else {
-     * console.log('Asset not found');
-     * }
-     * ```
-     */
-    getAssetById = async (assetId, userId) => {
-        return this.prisma.asset.findMany({
-            where: { id: assetId, user_id: userId },
-        });
+        return data;
     };
     /**
-     * Approve an asset by updating its status
-     * @param {string} assetId - Asset ID to approve
-     * @param {string} userId - User ID who owns the asset
-     * @param {string} status - New status to set (e.g., 'approved')
-     * @return {Promise<Asset>} Updated asset record
-     * @example
-     * ```
-     * const updatedAsset = await service.approveAsset('asset-456
-     * ', 'user-123');
-     * console.log(`Asset ${updatedAsset.id} approved`);
-     * ```
-     */
+   * Get specific asset by ID for a user (excludes document-related fields)
+   * @param {string} assetId - Asset ID to fetch
+   * @param {string} userId - User ID who owns the asset
+   * @return {Promise<Partial<Asset> | null>} Asset record without document fields or null if not found
+   * @example
+   * ```
+   * const asset = await service.getAssetById('asset-456', 'user-123');
+   * if (asset) {
+   *   console.log(`Asset Name: ${asset.name}`);
+   *   // document_type, document_metadata, file_name, file_size, mime_type, file_content are excluded
+   * } else {
+   *   console.log('Asset not found');
+   * }
+   * ```
+   */
+    getAssetById = async (assetId, userId) => {
+        const asset = await this.prisma.asset.findFirst({
+            where: { id: assetId, user_id: userId },
+            select: {
+                // ✅ Core Identity
+                id: true,
+                user_id: true,
+                name: true,
+                // ✅ Classification
+                type: true,
+                sub_type: true,
+                // ✅ Bank/Financial Account Details
+                account_number: true,
+                ifsc_code: true,
+                branch_name: true,
+                bank_name: true,
+                // ✅ Financial Values
+                balance: true,
+                total_value: true,
+                // ✅ Status & Tracking
+                status: true,
+                last_updated: true,
+                // ✅ Address & Location
+                address: true,
+                // ✅ Nominee/Beneficiary Details
+                nominee: true,
+                // ✅ Insurance/Investment Specific Fields
+                policy_number: true,
+                fund_name: true,
+                folio_number: true,
+                // ✅ References
+                transaction_id: true,
+                email_id: true,
+                // ✅ Issues
+                issues: true,
+                crn_number: true,
+                // ✅ Timestamps
+                created_at: true,
+                updated_at: true,
+                // ❌ EXCLUDED - Document/Attachment Fields
+                document_type: false,
+                document_metadata: false,
+                file_name: false,
+                file_size: false,
+                mime_type: false,
+                file_content: false,
+            },
+        });
+        return asset;
+    };
+    /**
+    * Approve an asset by updating its status (returns asset without document fields)
+    * @param {string} assetId - Asset ID to approve
+    * @param {string} userId - User ID who owns the asset
+    * @param {string} status - New status to set (e.g., 'active', 'approved')
+    * @return {Promise<{
+    *   updatedData: Partial<Asset>;
+    *   status: any;
+    * }>} Updated asset record without document fields
+    * @example
+    * ```
+    * const result = await service.approveAsset('asset-456', 'user-123', 'active');
+    * console.log(`Asset ${result.updatedData.id} approved`);
+    * // Document fields are excluded from response
+    * ```
+    */
     approveAsset = async (assetId, userId, status) => {
         const Status = await this.prisma.asset.updateMany({
             where: { id: assetId, user_id: userId },
             data: { status: status || "needs_attention" },
         });
+        const updatedAsset = await this.prisma.asset.findUnique({
+            where: { id: assetId },
+            select: {
+                // ✅ Core Identity
+                id: true,
+                user_id: true,
+                name: true,
+                // ✅ Classification
+                type: true,
+                sub_type: true,
+                // ✅ Bank/Financial Account Details
+                account_number: true,
+                ifsc_code: true,
+                branch_name: true,
+                bank_name: true,
+                // ✅ Financial Values
+                balance: true,
+                total_value: true,
+                // ✅ Status & Tracking
+                status: true,
+                last_updated: true,
+                // ✅ Address & Location
+                address: true,
+                // ✅ Nominee/Beneficiary Details
+                nominee: true,
+                // ✅ Insurance/Investment Specific Fields
+                policy_number: true,
+                fund_name: true,
+                folio_number: true,
+                // ✅ References
+                transaction_id: true,
+                email_id: true,
+                // ✅ Issues
+                issues: true,
+                // ✅ Timestamps
+                created_at: true,
+                updated_at: true,
+                crn_number: true,
+                // ❌ EXCLUDED - Document/Attachment Fields
+                document_type: false,
+                document_metadata: false,
+                file_name: false,
+                file_size: false,
+                mime_type: false,
+                file_content: false,
+            },
+        });
         return {
-            updatedData: await this.prisma.asset.findUnique({
-                where: { id: assetId },
-            }),
+            updatedData: updatedAsset,
             status: Status,
         };
     };
     /**
-     * Edit the details of an existing asset
+     * Edit the details of an existing asset (excludes document-related fields from updates)
      * @param {string} assetId - ID of the asset to edit
      * @param {string} userId - ID of the user who owns the asset
      * @param {Partial<Asset>} updates - Object containing fields to update
-     * @return {Promise<Asset>} - The updated asset record
+     * @return {Promise<Partial<Asset>>} - The updated asset record (without document fields)
      * @example
      * ```
-     * const updatedAsset = await service.editAsset('asset-456', 'user-123', {
+     * const updatedAsset = await service.updateAsset('asset-456', 'user-123', {
      *   name: 'Updated Asset Name',
-     *  balance: 15000.00,
+     *   balance: 15000.00,
      * });
      * console.log(`Asset ${updatedAsset.id} updated`);
+     * // document_type, file_name, etc. are not returned
      * ```
      * @throws {Error} If the asset is not found or the user is unauthorized
-     *
      */
     updateAsset = async (assetId, userId, updates) => {
         const asset = await this.prisma.asset.findUnique({
@@ -137,10 +276,84 @@ export class FinancialDataService {
         if (!asset || asset.user_id !== userId) {
             throw new Error('Asset not found or unauthorized');
         }
-        return this.prisma.asset.update({
+        // 🧩 Define allowed fields for update (EXCLUDING document fields)
+        const allowedFields = [
+            "name",
+            "type",
+            "sub_type",
+            "account_number",
+            "ifsc_code",
+            "branch_name",
+            "bank_name",
+            "balance",
+            "total_value",
+            "status",
+            "address",
+            "nominee",
+            "policy_number",
+            "fund_name",
+            "folio_number",
+            "crn_number",
+            "issues",
+            // ❌ EXCLUDED: document_type, document_metadata, file_name, file_size, mime_type, file_content
+        ];
+        // ✅ Filter out unwanted fields
+        const safeUpdates = {};
+        for (const key of allowedFields) {
+            if (updates[key] !== undefined) {
+                safeUpdates[key] = updates[key];
+            }
+        }
+        // 🛠 Update only allowed fields and return without document fields
+        const updatedAsset = await this.prisma.asset.update({
             where: { id: assetId },
-            data: updates,
+            data: safeUpdates,
+            select: {
+                // ✅ Core Identity
+                id: true,
+                user_id: true,
+                name: true,
+                // ✅ Classification
+                type: true,
+                sub_type: true,
+                // ✅ Bank/Financial Account Details
+                account_number: true,
+                ifsc_code: true,
+                branch_name: true,
+                bank_name: true,
+                // ✅ Financial Values
+                balance: true,
+                total_value: true,
+                // ✅ Status & Tracking
+                status: true,
+                last_updated: true,
+                // ✅ Address & Location
+                address: true,
+                // ✅ Nominee/Beneficiary Details
+                nominee: true,
+                // ✅ Insurance/Investment Specific Fields
+                policy_number: true,
+                fund_name: true,
+                folio_number: true,
+                crn_number: true,
+                // ✅ References
+                transaction_id: true,
+                email_id: true,
+                // ✅ Issues
+                issues: true,
+                // ✅ Timestamps
+                created_at: true,
+                updated_at: true,
+                // ❌ EXCLUDED - Document/Attachment Fields
+                document_type: false,
+                document_metadata: false,
+                file_name: false,
+                file_size: false,
+                mime_type: false,
+                file_content: false,
+            },
         });
+        return updatedAsset;
     };
     /**
      * Process financial email with attachments
@@ -205,7 +418,7 @@ export class FinancialDataService {
                 sender: emailData.from,
                 attachmentContents: emailData.attachmentContents,
                 documentType: this.guessDocumentType(emailData.subject),
-            });
+            }, userId);
             console.log('📊 Email Analysis:', emailAnalysis);
             if (emailAnalysis.extractedData.confidence < 40) {
                 console.log(`⚠️ Low confidence: ${emailAnalysis.extractedData.confidence}%`);
@@ -222,6 +435,8 @@ export class FinancialDataService {
                         documentType: this.guessDocumentType(attachment.filename),
                     });
                     const extracted = emailAnalysis.extractedData;
+                    console.log('extracted data :: ', emailAnalysis.extractedData);
+                    // console.log(`Extracted Data :: ${JSON.stringify(extracted)}`)
                     // Save to Asset with ALL new fields
                     const assetRecord = await this.prisma.asset.create({
                         data: {
@@ -240,13 +455,17 @@ export class FinancialDataService {
                                 ? parseFloat(String(extracted.amount))
                                 : extracted.financialMetadata?.currentValue
                                     ? parseFloat(String(extracted.financialMetadata.currentValue))
-                                    : null,
+                                    : emailAnalysis.extractedData.amount
+                                        ? parseFloat(String(emailAnalysis.extractedData.amount))
+                                        : null,
                             total_value: extracted.financialMetadata?.totalValue
                                 ? parseFloat(String(extracted.financialMetadata.totalValue))
-                                : null,
+                                : emailAnalysis.extractedData.amount
+                                    ? parseFloat(String(emailAnalysis.extractedData.amount))
+                                    : null,
                             // 📊 Status
                             // status: extracted.status || 'active', // Deprecated
-                            status: 'pending',
+                            status: 'inactive',
                             last_updated: new Date(),
                             // 💳 Insurance/Investment Fields
                             policy_number: extracted.policyNumber,
@@ -285,6 +504,8 @@ export class FinancialDataService {
                                 keyPoints: emailAnalysis.keyPoints,
                             },
                             email_id: emailData.emailId,
+                            issues: emailAnalysis.issues || [],
+                            required_fields: emailAnalysis.required_fields || [],
                         },
                     });
                     assetIds.push(assetRecord.id);
@@ -360,392 +581,6 @@ export class FinancialDataService {
                 error: error instanceof Error ? error.message : 'Unknown error',
             };
         }
-    }
-    /**
-     * Process individual attachment file from file system
-     *
-     * Handles direct file processing (not from Gmail API):
-     * 1. Reads file content based on mime type
-     * 2. Sends content to AI for analysis
-     * 3. Saves to PdfDocument table
-     * 4. Saves to Document table
-     * 5. Generates markdown and HTML representation
-     *
-     * @param {string} filePath - Absolute path to the attachment file
-     * @param {string} userId - User ID who owns this file
-     * @returns {Promise<any | null>} Analysis result with document IDs or null if confidence too low
-     *
-     * @private
-     * @throws {Error} If file reading or database operations fail
-     *
-     * @example
-     * ```
-     * const result = await service.processAttachmentFile(
-     *   '/uploads/invoice.pdf',
-     *   'user-123'
-     * );
-     * if (result) {
-     *   console.log(`PDF Document ID: ${result.pdfDocumentId}`);
-     *   console.log(`Document ID: ${result.documentId}`);
-     * }
-     * ```
-     *
-     * @remarks
-     * - Files with confidence < 30% are skipped
-     * - Generates both markdown and HTML representations
-     * - Does NOT save to Asset table (only PdfDocument and Document)
-     * - Suitable for batch file processing from uploads folder
-     */
-    async processAttachmentFile(filePath, userId) {
-        try {
-            console.log(`📄 Analyzing attachment: ${filePath}`);
-            const fileName = path.basename(filePath);
-            const fileStats = fs.statSync(filePath);
-            const fileSize = fileStats.size;
-            const mimeType = this.getMimeType(filePath);
-            // Read file content based on type
-            const fileContent = this.readFileContent(filePath);
-            // 🤖 AI ANALYSIS - Send extracted content to AI
-            console.log(`🤖 Sending content to AI for analysis...`);
-            const analysis = await this.aiService.analyzePDFDocument({
-                text: fileContent,
-                documentType: this.guessDocumentType(fileName),
-            });
-            console.log(`✅ AI Analysis completed:`, {
-                confidence: analysis.extractedData?.confidence,
-                transactionType: analysis.extractedData?.transactionType,
-                amount: analysis.extractedData?.amount,
-            });
-            // Skip low confidence results
-            if (analysis.extractedData.confidence < 30) {
-                console.log(`⚠️  Low confidence (${analysis.extractedData.confidence}%), skipping`);
-                return null;
-            }
-            // Map transaction type to standard format
-            let docType = analysis.extractedData.transactionType || 'other';
-            const typeMap = {
-                invoice: 'invoice',
-                receipt: 'receipt',
-                statement: 'statement',
-                tax: 'tax',
-                creditcard: 'credit_card',
-                bill: 'bill',
-                other: 'other',
-            };
-            docType = typeMap[docType] || 'other';
-            // Create markdown representation
-            const markdownContent = this.createMarkdownContent(fileName, fileSize, mimeType, docType, analysis);
-            // Save to PdfDocument table
-            const pdfDocument = await this.prisma.pdfDocument.create({
-                data: {
-                    userId: userId,
-                    filename: fileName,
-                    originalFilename: fileName,
-                    filePath: null,
-                    fileSize: BigInt(fileSize),
-                    mimeType: mimeType,
-                    parsingStatus: 'completed',
-                    extractedText: markdownContent.substring(0, 10000), // Limit to 10k chars
-                    extractedData: analysis.extractedData,
-                    pageCount: this.estimatePageCount(markdownContent),
-                    uploadSource: 'gmail',
-                },
-            });
-            // Save to Document table
-            const document = await this.prisma.document.create({
-                data: {
-                    userId: userId,
-                    filename: fileName,
-                    originalFilename: fileName,
-                    filePath: null,
-                    fileSize: BigInt(fileSize),
-                    mimeType: mimeType,
-                    parsingStatus: 'completed',
-                    extractedText: markdownContent.substring(0, 10000),
-                    documentType: docType,
-                    documentCategory: this.guessDocumentType(fileName),
-                    confidenceScore: analysis.extractedData.confidence,
-                    extractedData: analysis.extractedData,
-                    dataQualityScore: analysis.extractedData.confidence,
-                    pageCount: this.estimatePageCount(markdownContent),
-                    aiModelUsed: 'openrouter-auto',
-                    processingMethod: 'ai',
-                },
-            });
-            console.log(`✅ Attachment analyzed: ${pdfDocument.id}`);
-            // Convert markdown to HTML for display
-            const htmlContent = this.markdownToHtml(markdownContent);
-            return {
-                pdfDocumentId: pdfDocument.id,
-                documentId: document.id,
-                fileName,
-                fileSize: `${(fileSize / 1024).toFixed(2)}KB`,
-                mimeType: mimeType,
-                htmlContent,
-                analysis: {
-                    extractedData: analysis.extractedData,
-                    summary: analysis.summary,
-                    keyPoints: analysis.keyPoints,
-                },
-            };
-        }
-        catch (error) {
-            console.error('❌ Error processing attachment file:', error);
-            return null;
-        }
-    }
-    /**
-     * Read file content based on mime type
-     *
-     * Handles different file types:
-     * - PDF, Images: Returns placeholder text (actual extraction done by parser service)
-     * - Excel, Spreadsheets: Returns placeholder text
-     * - CSV: Reads first 2000 characters
-     * - Text files: Reads first 1000 characters
-     *
-     * @param {string} filePath - Path to the file
-     * @returns {string} Extracted or placeholder content
-     *
-     * @private
-     * @example
-     * ```
-     * const content = this.readFileContent('/uploads/invoice.pdf');
-     * console.log(content);
-     * // Output: "File: invoice.pdf\nType: application/pdf\n\nContent extracted..."
-     * ```
-     */
-    readFileContent(filePath) {
-        try {
-            const fileName = path.basename(filePath);
-            const ext = path.extname(filePath).toLowerCase();
-            // Binary files (PDF, Images) - Return placeholder
-            if (ext === '.pdf' || ext.match(/\.(jpg|jpeg|png|gif|tiff)$/i)) {
-                return `File: ${fileName}\nType: ${this.getMimeType(filePath)}\n\nContent extracted and processed by AI.`;
-            }
-            // Spreadsheet files
-            if (ext === '.xlsx' || ext === '.xls') {
-                return `Spreadsheet: ${fileName}\nContent extracted and processed by AI.`;
-            }
-            // CSV files - Try to read content
-            if (ext === '.csv') {
-                try {
-                    const buffer = fs.readFileSync(filePath);
-                    const content = buffer.toString('utf-8');
-                    return content.substring(0, 2000); // First 2000 chars
-                }
-                catch (e) {
-                    return `CSV File: ${fileName}\nContent extracted by AI.`;
-                }
-            }
-            // Text files - Try to read content
-            try {
-                const buffer = fs.readFileSync(filePath);
-                const content = buffer.toString('utf-8');
-                return content.substring(0, 1000); // First 1000 chars
-            }
-            catch (e) {
-                return `File: ${fileName}\nContent extracted by AI.`;
-            }
-        }
-        catch (error) {
-            console.error('Error reading file content:', error);
-            return '';
-        }
-    }
-    /**
-     * Create markdown content with extracted data
-     *
-     * Generates a structured markdown document containing:
-     * - Document information table
-     * - Analysis results
-     * - Summary text
-     * - Key points list
-     * - Financial information (if available)
-     * - Processing metadata
-     *
-     * @param {string} fileName - Name of the file
-     * @param {number} fileSize - File size in bytes
-     * @param {string} mimeType - MIME type of the file
-     * @param {string} docType - Document type classification
-     * @param {any} analysis - AI analysis results
-     * @returns {string} Formatted markdown content
-     *
-     * @private
-     * @example
-     * ```
-     * const markdown = this.createMarkdownContent(
-     *   'invoice.pdf',
-     *   102400,
-     *   'application/pdf',
-     *   'invoice',
-     *   aiAnalysis
-     * );
-     * ```
-     */
-    createMarkdownContent(fileName, fileSize, mimeType, docType, analysis) {
-        const fileSizeKB = (fileSize / 1024).toFixed(2);
-        let markdown = `# ${fileName}
-
-## Document Information
-
-| Property | Value |
-|----------|-------|
-| File Name | ${fileName} |
-| File Size | ${fileSizeKB}KB |
-| MIME Type | ${mimeType} |
-| Document Type | ${docType} |
-| Status | ✓ Processed |
-
-## Analysis Results
-
-| Metric | Value |
-|--------|-------|
-| Transaction Type | ${analysis.extractedData.transactionType} |
-| Confidence Score | ${analysis.extractedData.confidence}% |
-| Quality Score | ${analysis.extractedData.confidence}% |
-
-## Summary
-
-${analysis.summary || 'Financial document successfully analyzed.'}
-
-`;
-        // Add key points if available
-        if (analysis.keyPoints && analysis.keyPoints.length > 0) {
-            markdown += `## Key Points\n\n`;
-            analysis.keyPoints.forEach((point) => {
-                markdown += `- ${point}\n`;
-            });
-            markdown += '\n';
-        }
-        // Add financial information if available
-        if (analysis.extractedData.amount) {
-            markdown += `## Financial Information\n\n`;
-            markdown += `- **Amount:** ${analysis.extractedData.currency} ${analysis.extractedData.amount}\n`;
-            if (analysis.extractedData.merchant) {
-                markdown += `- **Merchant:** ${analysis.extractedData.merchant}\n`;
-            }
-            if (analysis.extractedData.date) {
-                markdown += `- **Date:** ${analysis.extractedData.date}\n`;
-            }
-            if (analysis.extractedData.description) {
-                markdown += `- **Description:** ${analysis.extractedData.description}\n`;
-            }
-            markdown += '\n';
-        }
-        // Add processing metadata
-        markdown += `## Processing Metadata
-
-- **Processed At:** ${new Date().toISOString()}
-- **AI Model:** OpenRouter Auto
-- **Processing Method:** AI Analysis`;
-        return markdown;
-    }
-    /**
-     * Convert markdown to styled HTML
-     *
-     * Converts markdown syntax to HTML with professional styling:
-     * - Headers (H1, H2, H3)
-     * - Tables with hover effects
-     * - Lists (bulleted)
-     * - Bold and italic text
-     * - Responsive design
-     *
-     * @param {string} markdown - Markdown content to convert
-     * @returns {string} Styled HTML content
-     *
-     * @private
-     * @example
-     * ```
-     * const html = this.markdownToHtml('# Title\n\nContent here...');
-     * // Returns: <div style="..."><h1>Title</h1><p>Content here...</p></div>
-     * ```
-     */
-    markdownToHtml(markdown) {
-        return `<div style="max-width: 900px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333;">
-${markdown
-            .split('\n')
-            .map((line) => {
-            // Headers
-            if (line.startsWith('# ')) {
-                return `<h1 style="font-size: 28px; font-weight: bold; margin: 30px 0 15px 0; color: #1a1a1a; border-bottom: 3px solid #007bff; padding-bottom: 10px;">${line.substring(2)}</h1>`;
-            }
-            if (line.startsWith('## ')) {
-                return `<h2 style="font-size: 22px; font-weight: bold; margin: 25px 0 12px 0; color: #0056b3;">${line.substring(3)}</h2>`;
-            }
-            if (line.startsWith('### ')) {
-                return `<h3 style="font-size: 18px; font-weight: bold; margin: 20px 0 10px 0; color: #0056b3;">${line.substring(4)}</h3>`;
-            }
-            // Tables
-            if (line.startsWith('| ')) {
-                if (line.includes('---') || line.includes('---')) {
-                    return ''; // Skip separator row
-                }
-                const cells = line
-                    .split('|')
-                    .map((cell) => cell.trim())
-                    .filter((cell) => cell.length > 0);
-                const isHeader = line.includes('---');
-                const cellHTML = cells
-                    .map((cell) => {
-                    const tag = isHeader ? 'th' : 'td';
-                    return `<${tag} style="border: 1px solid #ddd; padding: 12px; text-align: left;">${cell}</${tag}>`;
-                })
-                    .join('');
-                return `<tr>${cellHTML}</tr>`;
-            }
-            // List items
-            if (line.startsWith('- ')) {
-                return `<li style="margin: 8px 0; margin-left: 20px;">${line.substring(2)}</li>`;
-            }
-            // Bold and italic text
-            let htmlLine = line
-                .replace(/\*\*(.*?)\*\*/g, '<strong style="font-weight: bold; color: #0056b3;">$1</strong>')
-                .replace(/__(.*?)__/g, '<strong style="font-weight: bold; color: #0056b3;">$1</strong>')
-                .replace(/\*(.*?)\*/g, '<em style="font-style: italic;">$1</em>');
-            if (htmlLine.trim().length === 0) {
-                return '<br style="margin: 10px 0;">';
-            }
-            if (!htmlLine.includes('<') && htmlLine.trim().length > 0) {
-                return `<p style="margin: 12px 0; line-height: 1.8;">${htmlLine}</p>`;
-            }
-            return htmlLine;
-        })
-            .join('\n')}
-</div>
-
-<style>
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 15px 0;
-    background: white;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    border-radius: 5px;
-    overflow: hidden;
-  }
-  
-  thead tr {
-    background: #007bff;
-    color: white;
-  }
-  
-  tbody tr:nth-child(even) {
-    background: #f8f9fa;
-  }
-  
-  tbody tr:hover {
-    background: #e7f3ff;
-  }
-  
-  ul {
-    list-style-type: disc;
-    margin: 15px 0;
-  }
-  
-  li {
-    margin: 8px 0;
-  }
-</style>`;
     }
     /**
      * Get all financial data for a user with filters

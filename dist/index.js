@@ -2,12 +2,15 @@
 import express from 'express';
 import cors from 'cors';
 import { config } from 'dotenv';
-import { connectDatabase, disconnectDatabase, checkDatabaseHealth, prisma } from './config/database';
-import googleRouter from '@routes/google.routes';
-import userRouter from './routes/user.routes';
-import emailProcessingRouter from './routes/email-processing.routes';
-import smsRouter from './routes/sms.route';
-import vaultRoutes from './routes/vault.routes';
+import { connectDatabase, disconnectDatabase, checkDatabaseHealth, prisma } from './config/database.js';
+import googleRouter from './routes/google.routes.js';
+import userRouter from './routes/user.routes.js';
+import emailProcessingRouter from './routes/email-processing.routes.js';
+import smsRouter from './routes/sms.route.js';
+import vaultRoutes from './routes/vault.routes.js';
+import familyRoutes from './routes/family.routes.js';
+import assetSharingRouter from './routes/asset-sharing.routes.js';
+import deviceInfoRouter from './routes/get-device-info.route.js';
 // Load environment variables
 config();
 console.log(process.env.GOOGLE_CLIENT_ID);
@@ -71,13 +74,14 @@ app.get('/api/db-test', async (req, res) => {
     }
 });
 // API Routes
+app.use('/', deviceInfoRouter);
 app.use('/api/google', googleRouter);
 app.use('/api/users', userRouter);
 app.use('/api/sms', smsRouter);
 app.use('/api/email-processing', emailProcessingRouter);
+app.use('/api/family', familyRoutes);
 app.use('/api/vault', vaultRoutes);
-// app.use('/api/auth', authRoutes);
-// app.use('/api/users', userRoutes);
+app.use('/api/asset-sharing', assetSharingRouter);
 // ============================================
 // Error Handling
 // ============================================

@@ -21,6 +21,7 @@ export interface EmailMessage {
   date: string;
   labels: string[];
   internalDate: string;
+  preview:string
 }
 
 export interface ListEmailsResponse {

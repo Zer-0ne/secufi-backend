@@ -112,20 +112,21 @@ export class UserService {
         }
       }
 
+      // NO needs for this code
       // Check if user exists by phone
-      if (data.phone) {
-        user = await this.prisma.user.findUnique({
-          where: { phone: data.phone },
-          include: {
-            owned_family: true,
-          },
-        });
+      // if (data.phone) {
+      //   user = await this.prisma.user.findFirst({
+      //     where: { phone: data.phone },
+      //     include: {
+      //       owned_family: true,
+      //     },
+      //   });
 
-        if (user) {
-          console.log(`✓ User already exists with phone: ${data.phone}`);
-          return { user, isNewUser: false, hadTempData: false };
-        }
-      }
+      //   if (user) {
+      //     console.log(`✓ User already exists with phone: ${data.phone}`);
+      //     return { user, isNewUser: false, hadTempData: false };
+      //   }
+      // }
 
       // Hash password if provided
       let hashedPassword = null;
@@ -487,7 +488,7 @@ export class UserService {
   formatUserResponse(user: User) {
     return {
       id: user.id,
-      email: user.email,
+      email: user.email!,
       name: user.name,
       user_type: user.user_type,
       role: user.role,

@@ -1,10 +1,10 @@
 import { Router } from 'express';
-import { GoogleService } from '@services/google.service';
+import { GoogleService } from '../services/google.service.js';
 import { PrismaClient } from '@prisma/client';
-import { EncryptionService } from '@services/encryption.service';
-import { authenticateJWT } from '@/middlewares/auth.middleware';
-import JWTService from '@/services/jwt.service';
-import { getExpiryDate, isExpired } from '@/config/utils';
+import { EncryptionService } from '../services/encryption.service.js';
+import { authenticateJWT } from '../middlewares/auth.middleware.js';
+import JWTService from '../services/jwt.service.js';
+import { getExpiryDate, isExpired } from '../config/utils.js';
 const googleRouter = Router();
 const prisma = new PrismaClient();
 const encryptionService = new EncryptionService();
@@ -16,7 +16,30 @@ const googleService = new GoogleService({
 }, prisma, encryptionService);
 /**
  * GET /api/google/auth-url/:userId
- * Get authorization URL for user consent
+ * Generate Google OAuth authorization URL for user consent
+ *
+ * @route GET /api/google/auth-url/:userId
+ * @param {string} userId - The unique identifier of the user
+ * @query {string} scopes - Comma-separated list of OAuth scopes (optional, defaults to Gmail readonly and send)
+ * @returns {Object} 200 - Success response with authorization URL
+ * @returns {Object} 400 - Bad request if userId is missing
+ * @returns {Object} 500 - Server error with error message
+ *
+ * @example
+ * // Request
+ * GET /api/google/auth-url/user123?scopes=https://www.googleapis.com/auth/gmail.readonly
+ *
+ * // Response
+ * {
+ *   "success": true,
+ *   "message": "Auth URL generated successfully",
+ *   "authUrl": "https://accounts.google.com/o/oauth2/v2/auth?..."
+ * }
+ *
+ * @description
+ * Generates a Google OAuth 2.0 authorization URL that users can visit to grant permissions.
+ * The URL includes the specified scopes and redirects back to the callback endpoint.
+ * Default scopes include Gmail readonly and send permissions.
  */
 googleRouter.get('/auth-url/:userId', async (req, res) => {
     try {
@@ -221,8 +244,30 @@ googleRouter.post('/get-token', authenticateJWT, async (req, res) => {
 });
 /**
  * GET /api/google/callback
- * Handle OAuth callback and exchange code for tokens
- * Query params: code, state (state contains encoded userId)
+ * Handle Google OAuth 2.0 callback and exchange authorization code for tokens
+ *
+ * @route GET /api/google/callback
+ * @query {string} code - Authorization code from Google OAuth
+ * @query {string} state - Encoded state parameter containing userId
+ * @query {string} error - OAuth error code (if any)
+ * @query {string} error_description - OAuth error description (if any)
+ * @returns Redirects to frontend with success/error parameters
+ *
+ * @example
+ * // Google redirects to:
+ * GET /api/google/callback?code=4/0AWgavdf...&state=encoded_userId
+ *
+ * // Frontend redirect on success:
+ * /auth/google/callback?success=true&userId=user123
+ *
+ * // Frontend redirect on error:
+ * /auth/google/callback?success=false&error=access_denied
+ *
+ * @description
+ * This endpoint handles the OAuth callback from Google after user authorization.
+ * It exchanges the authorization code for access and refresh tokens, stores them
+ * securely in the database, and redirects the user back to the frontend application.
+ * The state parameter contains the encoded userId for token association.
  */
 googleRouter.get('/callback', async (req, res) => {
     try {
@@ -313,13 +358,50 @@ googleRouter.get('/callback', async (req, res) => {
 });
 /**
  * GET /api/google/emails/:userId
- * List all emails with pagination
+ * Retrieve a list of emails from the user's Gmail account with pagination support
+ *
+ * @route GET /api/google/emails/:userId
+ * @param {string} userId - The unique identifier of the user
+ * @query {number} maxResults - Maximum number of emails to return (default: 10, max: 500)
+ * @query {string} pageToken - Token for retrieving the next page of results
+ * @returns {Object} 200 - Success response with email list
+ * @returns {Object} 400 - Bad request if userId is missing
+ * @returns {Object} 401 - Unauthorized if no valid credentials found
+ * @returns {Object} 500 - Server error with error message
+ *
+ * @example
+ * // Request
+ * GET /api/google/emails/user123?maxResults=20&pageToken=nextPageToken
+ *
+ * // Response
+ * {
+ *   "success": true,
+ *   "message": "Retrieved 20 emails",
+ *   "data": {
+ *     "emails": [
+ *       {
+ *         "id": "emailId1",
+ *         "threadId": "threadId1",
+ *         "labelIds": ["INBOX"],
+ *         "snippet": "Email preview text...",
+ *         "payload": { ... }
+ *       }
+ *     ],
+ *     "nextPageToken": "nextPageToken",
+ *     "resultSizeEstimate": 100
+ *   }
+ * }
+ *
+ * @description
+ * Retrieves emails from the authenticated user's Gmail account using the Gmail API.
+ * Supports pagination for handling large email volumes. Requires valid Google OAuth tokens.
+ * Emails are returned in reverse chronological order (newest first).
  */
 googleRouter.get('/emails/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const maxResults = parseInt(req.query.maxResults || '10');
-        const pageToken = req.query.pageToken || undefined;
+        const maxResults = parseInt(String(req.query.maxResults || '10'));
+        const pageToken = req.query.pageToken ? String(req.query.pageToken) : undefined;
         if (!userId) {
             res.status(400).json({
                 success: false,
@@ -357,7 +439,49 @@ googleRouter.get('/emails/:userId', async (req, res) => {
 });
 /**
  * GET /api/google/emails/:userId/:id
- * Get specific email by ID
+ * Retrieve a specific email from the user's Gmail account by its unique ID
+ *
+ * @route GET /api/google/emails/:userId/:id
+ * @param {string} userId - The unique identifier of the user
+ * @param {string} id - The unique Gmail message ID to retrieve
+ * @returns {Object} 200 - Success response with email data
+ * @returns {Object} 400 - Bad request if userId or id is missing
+ * @returns {Object} 401 - Unauthorized if no valid credentials found
+ * @returns {Object} 404 - Not found if email with specified ID doesn't exist
+ * @returns {Object} 500 - Server error with error message
+ *
+ * @example
+ * // Request
+ * GET /api/google/emails/user123/18c4b8f4d5e6f7g8
+ *
+ * // Response
+ * {
+ *   "success": true,
+ *   "message": "Email retrieved successfully",
+ *   "data": {
+ *     "id": "18c4b8f4d5e6f7g8",
+ *     "threadId": "18c4b8f4d5e6f7g8",
+ *     "labelIds": ["INBOX"],
+ *     "snippet": "Email preview text...",
+ *     "payload": {
+ *       "headers": [
+ *         {"name": "Subject", "value": "Hello World"},
+ *         {"name": "From", "value": "sender@example.com"},
+ *         {"name": "To", "value": "recipient@example.com"}
+ *       ],
+ *       "body": { ... },
+ *       "parts": [ ... ]
+ *     },
+ *     "sizeEstimate": 2048,
+ *     "historyId": "123456789",
+ *     "internalDate": "1638360000000"
+ *   }
+ * }
+ *
+ * @description
+ * Retrieves a single email message from the authenticated user's Gmail account using the Gmail API.
+ * The email is identified by its unique message ID. Returns full email data including headers,
+ * body content, attachments information, and metadata. Requires valid Google OAuth tokens.
  */
 googleRouter.get('/emails/:userId/:id', async (req, res) => {
     try {
@@ -412,8 +536,8 @@ googleRouter.get('/emails/:userId/:id', async (req, res) => {
 googleRouter.get('/search/:userId', async (req, res) => {
     try {
         const { userId } = req.params;
-        const query = req.query.q || '';
-        const maxResults = parseInt(req.query.maxResults || '10');
+        const query = String(req.query.q || '');
+        const maxResults = parseInt(String(req.query.maxResults || '10'));
         if (!userId || !query) {
             res.status(400).json({
                 success: false,

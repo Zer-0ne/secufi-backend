@@ -83,7 +83,7 @@ userRouter.post('/', checkTempUser, async (req: Request, res: Response) => {
     const response: CreateUserResponse = {
       success: true,
       message: isNewUser
-        ? hadTempData 
+        ? hadTempData
           ? 'User created successfully from invitation'
           : 'User created successfully'
         : 'User already exists',
@@ -143,23 +143,29 @@ userRouter.put('/kyc', authenticateJWT, async (req: AuthenticatedRequest, res: R
 
     }
     const { id: userId } = user as User;
-    const { phone, address, date_of_birth, pan_number,name } = req.body;
+    const { phone, address, date_of_birth, pan_number, name } = req.body;
     const { wants_to_update_details } = req.query;
     if (!phone || !date_of_birth || !pan_number) {
       return res.status(400).json({ success: false, message: 'phone, pan number, address and date_of_birth are required' });
 
     }
 
-    // if (!wants_to_update_details && (user as User).is_verified) {
+    if (!wants_to_update_details && (user as User).is_verified) {
 
-    //   // this will change to status(400) and success is false in future now this is for testing purpose
-    //   return res.status(200).json({
-    //     success: true, message: 'You are already varified, Do you want update your details?',
-    //     action: {
-    //       redirect: '/api/users/kyc?wants_to_update_details=true',
-    //     }
-    //   });
-    // }
+      // this will change to status(400) and success is false in future now this is for testing purpose
+      return res.status(200).json({
+        success: true, message: 'You are already varified, Do you want update your details?',
+        action: {
+          redirect: '/api/users/kyc?wants_to_update_details=true',
+        }
+      });
+    }
+
+    let senetize_dob = ''
+
+    if ((date_of_birth as string).split('/')[0].length <= 2) {
+      senetize_dob = (date_of_birth as string).split('/').reverse().join()
+    }
 
     // console.log(date_of_birth.toISOString().split("T")[0])
 
@@ -167,7 +173,7 @@ userRouter.put('/kyc', authenticateJWT, async (req: AuthenticatedRequest, res: R
       phone,
       address,
       name,
-      date_of_birth: new Date(date_of_birth),
+      date_of_birth: new Date(senetize_dob),
       is_verified: true,
       pan_number,
     } as any);
@@ -185,6 +191,188 @@ userRouter.put('/kyc', authenticateJWT, async (req: AuthenticatedRequest, res: R
     return res.status(500).json({ success: false, message: 'Failed to update profile', error: error instanceof Error ? error.message : 'Unknown error' });
   }
 });
+
+
+/**
+ * POST /api/users/register
+ * Register new user (with temp user migration support)
+ */
+/**
+ * POST /api/auth/register-with-invitation
+ * Register user from family invitation link
+ * Query params: invitation, email, token
+ */
+userRouter.get('/register-with-invitation', async (req: Request, res: Response): Promise<Response> => {
+  try {
+    const { invitation: invitationId, email, token } = req.query;
+
+    // ✅ Validate query params
+    if (!invitationId || !email || !token) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invitation ID, email, and token are required in query params',
+        error: 'Missing required parameters',
+      });
+    }
+
+    // ✅ Verify one-time token
+    try {
+      const payload = await JWTService.verifyAccessToken(token as string);
+      if (payload.isUsed) {
+        return res.status(401).json({
+          success: false,
+          message: 'This invitation link has already been used or expired',
+          error: 'Token already used',
+        });
+      }
+    } catch (tokenError) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired invitation token',
+        error: 'Invalid token',
+      });
+    }
+
+    // ✅ Validate email format
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email as string)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid email format',
+        error: 'Please provide a valid email address',
+      });
+    }
+
+    // ✅ Check if user already exists
+    const existingUser = await prisma.user.findUnique({
+      where: { email: (email as string).trim() },
+    });
+
+    if (existingUser) {
+      return res.status(409).json({
+        success: false,
+        message: 'User with this email already exists',
+        error: 'Duplicate email',
+      });
+    }
+
+    // ✅ Fetch TempUser data
+    const tempUser = await prisma.tempUser.findUnique({
+      where: { email: (email as string).trim() },
+    });
+
+    if (!tempUser) {
+      return res.status(404).json({
+        success: false,
+        message: 'No invitation found for this email',
+        error: 'No invitation found for this email',
+      });
+    }
+
+    // ✅ Verify invitation exists and is pending
+    const invitation = await prisma.familyInvitation.findUnique({
+      where: { id: invitationId as string },
+      include: { family: true },
+    });
+
+    if (!invitation) {
+      return res.status(404).json({
+        success: false,
+        message: 'Invitation not found',
+        error: 'Invalid invitation ID',
+      });
+    }
+
+    if (invitation.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: `This invitation has already been ${invitation.status}`,
+        error: 'Invitation not pending',
+      });
+    }
+
+    // ✅ Check if invitation expired
+    if (invitation.expires_at && invitation.expires_at < new Date()) {
+      await prisma.familyInvitation.update({
+        where: { id: invitationId as string },
+        data: { status: 'expired' },
+      });
+
+      return res.status(400).json({
+        success: false,
+        message: 'This invitation has expired',
+        error: 'Invitation expired',
+      });
+    }
+
+    // ✅ Create new user with temp user data
+    const newUser = await prisma.user.create({
+      data: {
+        email: (email as string).trim(),
+        name: tempUser.name || null,
+        phone: tempUser.phone || null,
+        password: null, // Hash this in production: await bcrypt.hash(password, 10)
+        user_type: 'parent',
+        is_active: true,
+        is_verified: false,
+      },
+    });
+
+    console.log(`✅ Created user from invitation: ${newUser.email}`);
+
+    // ✅ Create family membership with role as STRING (based on your current schema)
+    const familyMember = await prisma.familyMember.create({
+      data: {
+        family_id: tempUser.invited_by_family_id!,
+        user_id: newUser.id,
+        role: tempUser.invited_role!, // ⚠️ Using String role (your current schema)
+        joined_at: new Date(),
+        is_active: true,
+        // Set permissions based on role
+        can_invite: tempUser.invited_role === 'admin',
+        can_view: true,
+        can_edit: tempUser.invited_role === 'admin' || tempUser.invited_role === 'member',
+        can_delete: tempUser.invited_role === 'admin',
+      },
+    });
+
+    // ✅ Update invitation status
+    await prisma.familyInvitation.update({
+      where: { id: invitationId as string },
+      data: {
+        status: 'accepted',
+        invited_user_id: newUser.id,
+        accepted_at: new Date(),
+      },
+    });
+
+    // ✅ Delete temp user
+    await prisma.tempUser.delete({
+      where: { email: (email as string).trim() },
+    });
+
+    console.log(`✅ User ${newUser.email} added to family ${invitation.family.name} as ${tempUser.invited_role}`);
+
+    return res.status(201).json({
+      success: true,
+      message: `Welcome! You've been added to ${invitation.family.name}`,
+      family: {
+        name: invitation.family.name,
+        role: tempUser.invited_role,
+      },
+    });
+  } catch (error) {
+    console.error('❌ Error in invitation registration:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Failed to complete registration',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+
+
 
 /**
  * GET /api/users/:userId
@@ -361,7 +549,7 @@ userRouter.put('/:userId', async (req: Request, res: Response) => {
       profile_picture,
       is_verified,
       is_active,
-    });
+    } as any);
 
     if (!updatedUser) {
       throw new Error('Failed to update user');

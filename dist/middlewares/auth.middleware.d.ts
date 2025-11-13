@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
-import { IDecodedToken } from '@/services/jwt.service';
+import { IDecodedToken } from '../services/jwt.service.js';
 export interface AuthenticatedRequest extends Request {
     user?: IDecodedToken;
 }

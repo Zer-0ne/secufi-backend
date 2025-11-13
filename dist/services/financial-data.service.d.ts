@@ -1,6 +1,5 @@
-import { PrismaClient } from '@prisma/client';
-import { AIService } from './ai.service';
-import { IAsset } from '@/config/interfaces';
+import { Asset, PrismaClient } from '@prisma/client';
+import { AIService } from './ai.service.js';
 /**
  * Interface representing email data received from Gmail API
  * Contains email metadata and attachment information
@@ -85,116 +84,62 @@ export declare class FinancialDataService {
      * console.log(`Found ${assets.length} assets`);
      * ```
      */
-    getAssetsByUserId: (userId: string) => Promise<{
-        account_number: string | null;
-        name: string | null;
-        id: string;
-        address: string | null;
-        created_at: Date;
-        updated_at: Date;
-        type: string;
-        status: string | null;
-        user_id: string;
-        sub_type: string | null;
-        ifsc_code: string | null;
-        branch_name: string | null;
-        bank_name: string | null;
-        balance: import("@prisma/client/runtime/library").Decimal | null;
-        total_value: import("@prisma/client/runtime/library").Decimal | null;
-        last_updated: Date;
-        nominee: import("@prisma/client/runtime/library").JsonValue | null;
-        policy_number: string | null;
-        fund_name: string | null;
-        folio_number: string | null;
-        document_type: string | null;
-        document_metadata: import("@prisma/client/runtime/library").JsonValue | null;
-        file_name: string | null;
-        file_size: number | null;
-        mime_type: string | null;
-        file_content: string | null;
-        transaction_id: string | null;
-        email_id: string | null;
-    }[]>;
-    /***
-     * Get specific asset by ID for a user
-     * @param {string} assetId - Asset ID to fetch
-     * @param {string} userId - User ID who owns the asset
-     * @return {Promise<Asset | null>} Asset record or null if not found
-     * @example
-     * ```
-     * const asset = await service.getAssetById('asset-456', 'user-123');
-     * if (asset) {
-     *  console.log(`Asset Name: ${asset.name}`);
-     * } else {
-     * console.log('Asset not found');
-     * }
-     * ```
-     */
-    getAssetById: (assetId: string, userId: string) => Promise<{
-        account_number: string | null;
-        name: string | null;
-        id: string;
-        address: string | null;
-        created_at: Date;
-        updated_at: Date;
-        type: string;
-        status: string | null;
-        user_id: string;
-        sub_type: string | null;
-        ifsc_code: string | null;
-        branch_name: string | null;
-        bank_name: string | null;
-        balance: import("@prisma/client/runtime/library").Decimal | null;
-        total_value: import("@prisma/client/runtime/library").Decimal | null;
-        last_updated: Date;
-        nominee: import("@prisma/client/runtime/library").JsonValue | null;
-        policy_number: string | null;
-        fund_name: string | null;
-        folio_number: string | null;
-        document_type: string | null;
-        document_metadata: import("@prisma/client/runtime/library").JsonValue | null;
-        file_name: string | null;
-        file_size: number | null;
-        mime_type: string | null;
-        file_content: string | null;
-        transaction_id: string | null;
-        email_id: string | null;
-    }[]>;
+    getAssetsByUserId: (userId: string) => Promise<Partial<Asset[]>>;
     /**
-     * Approve an asset by updating its status
-     * @param {string} assetId - Asset ID to approve
-     * @param {string} userId - User ID who owns the asset
-     * @param {string} status - New status to set (e.g., 'approved')
-     * @return {Promise<Asset>} Updated asset record
-     * @example
-     * ```
-     * const updatedAsset = await service.approveAsset('asset-456
-     * ', 'user-123');
-     * console.log(`Asset ${updatedAsset.id} approved`);
-     * ```
-     */
+   * Get specific asset by ID for a user (excludes document-related fields)
+   * @param {string} assetId - Asset ID to fetch
+   * @param {string} userId - User ID who owns the asset
+   * @return {Promise<Partial<Asset> | null>} Asset record without document fields or null if not found
+   * @example
+   * ```
+   * const asset = await service.getAssetById('asset-456', 'user-123');
+   * if (asset) {
+   *   console.log(`Asset Name: ${asset.name}`);
+   *   // document_type, document_metadata, file_name, file_size, mime_type, file_content are excluded
+   * } else {
+   *   console.log('Asset not found');
+   * }
+   * ```
+   */
+    getAssetById: (assetId: string, userId: string) => Promise<Partial<Asset> | null>;
+    /**
+    * Approve an asset by updating its status (returns asset without document fields)
+    * @param {string} assetId - Asset ID to approve
+    * @param {string} userId - User ID who owns the asset
+    * @param {string} status - New status to set (e.g., 'active', 'approved')
+    * @return {Promise<{
+    *   updatedData: Partial<Asset>;
+    *   status: any;
+    * }>} Updated asset record without document fields
+    * @example
+    * ```
+    * const result = await service.approveAsset('asset-456', 'user-123', 'active');
+    * console.log(`Asset ${result.updatedData.id} approved`);
+    * // Document fields are excluded from response
+    * ```
+    */
     approveAsset: (assetId: string, userId: string, status: string) => Promise<{
-        updatedData: IAsset;
-        status: import(".prisma/client").Prisma.BatchPayload;
+        updatedData: Partial<Asset>;
+        status: any;
     }>;
     /**
-     * Edit the details of an existing asset
+     * Edit the details of an existing asset (excludes document-related fields from updates)
      * @param {string} assetId - ID of the asset to edit
      * @param {string} userId - ID of the user who owns the asset
      * @param {Partial<Asset>} updates - Object containing fields to update
-     * @return {Promise<Asset>} - The updated asset record
+     * @return {Promise<Partial<Asset>>} - The updated asset record (without document fields)
      * @example
      * ```
-     * const updatedAsset = await service.editAsset('asset-456', 'user-123', {
+     * const updatedAsset = await service.updateAsset('asset-456', 'user-123', {
      *   name: 'Updated Asset Name',
-     *  balance: 15000.00,
+     *   balance: 15000.00,
      * });
      * console.log(`Asset ${updatedAsset.id} updated`);
+     * // document_type, file_name, etc. are not returned
      * ```
      * @throws {Error} If the asset is not found or the user is unauthorized
-     *
      */
-    updateAsset: (assetId: string, userId: string, updates: Partial<any>) => Promise<IAsset>;
+    updateAsset: (assetId: string, userId: string, updates: Partial<any>) => Promise<Partial<Asset>>;
     /**
      * Process financial email with attachments
      *
@@ -242,115 +187,6 @@ export declare class FinancialDataService {
      * - All IDs are tracked in transaction's extracted_data for easy cross-referencing
      */
     processFinancialEmail(userId: string, emailData: EmailData): Promise<any>;
-    /**
-     * Process individual attachment file from file system
-     *
-     * Handles direct file processing (not from Gmail API):
-     * 1. Reads file content based on mime type
-     * 2. Sends content to AI for analysis
-     * 3. Saves to PdfDocument table
-     * 4. Saves to Document table
-     * 5. Generates markdown and HTML representation
-     *
-     * @param {string} filePath - Absolute path to the attachment file
-     * @param {string} userId - User ID who owns this file
-     * @returns {Promise<any | null>} Analysis result with document IDs or null if confidence too low
-     *
-     * @private
-     * @throws {Error} If file reading or database operations fail
-     *
-     * @example
-     * ```
-     * const result = await service.processAttachmentFile(
-     *   '/uploads/invoice.pdf',
-     *   'user-123'
-     * );
-     * if (result) {
-     *   console.log(`PDF Document ID: ${result.pdfDocumentId}`);
-     *   console.log(`Document ID: ${result.documentId}`);
-     * }
-     * ```
-     *
-     * @remarks
-     * - Files with confidence < 30% are skipped
-     * - Generates both markdown and HTML representations
-     * - Does NOT save to Asset table (only PdfDocument and Document)
-     * - Suitable for batch file processing from uploads folder
-     */
-    private processAttachmentFile;
-    /**
-     * Read file content based on mime type
-     *
-     * Handles different file types:
-     * - PDF, Images: Returns placeholder text (actual extraction done by parser service)
-     * - Excel, Spreadsheets: Returns placeholder text
-     * - CSV: Reads first 2000 characters
-     * - Text files: Reads first 1000 characters
-     *
-     * @param {string} filePath - Path to the file
-     * @returns {string} Extracted or placeholder content
-     *
-     * @private
-     * @example
-     * ```
-     * const content = this.readFileContent('/uploads/invoice.pdf');
-     * console.log(content);
-     * // Output: "File: invoice.pdf\nType: application/pdf\n\nContent extracted..."
-     * ```
-     */
-    private readFileContent;
-    /**
-     * Create markdown content with extracted data
-     *
-     * Generates a structured markdown document containing:
-     * - Document information table
-     * - Analysis results
-     * - Summary text
-     * - Key points list
-     * - Financial information (if available)
-     * - Processing metadata
-     *
-     * @param {string} fileName - Name of the file
-     * @param {number} fileSize - File size in bytes
-     * @param {string} mimeType - MIME type of the file
-     * @param {string} docType - Document type classification
-     * @param {any} analysis - AI analysis results
-     * @returns {string} Formatted markdown content
-     *
-     * @private
-     * @example
-     * ```
-     * const markdown = this.createMarkdownContent(
-     *   'invoice.pdf',
-     *   102400,
-     *   'application/pdf',
-     *   'invoice',
-     *   aiAnalysis
-     * );
-     * ```
-     */
-    private createMarkdownContent;
-    /**
-     * Convert markdown to styled HTML
-     *
-     * Converts markdown syntax to HTML with professional styling:
-     * - Headers (H1, H2, H3)
-     * - Tables with hover effects
-     * - Lists (bulleted)
-     * - Bold and italic text
-     * - Responsive design
-     *
-     * @param {string} markdown - Markdown content to convert
-     * @returns {string} Styled HTML content
-     *
-     * @private
-     * @example
-     * ```
-     * const html = this.markdownToHtml('# Title\n\nContent here...');
-     * // Returns: <div style="..."><h1>Title</h1><p>Content here...</p></div>
-     * ```
-     */
-    private markdownToHtml;
     /**
      * Get all financial data for a user with filters
      *
@@ -406,10 +242,10 @@ export declare class FinancialDataService {
             updated_at: Date;
             status: import(".prisma/client").$Enums.TransactionStatus;
             user_id: string;
-            email_id: string;
-            merchant: string | null;
             description: string | null;
             currency: string | null;
+            email_id: string;
+            merchant: string | null;
             amount: import("@prisma/client/runtime/library").Decimal | null;
             subject: string | null;
             sender: string;

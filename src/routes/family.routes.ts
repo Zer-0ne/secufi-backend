@@ -18,6 +18,7 @@
 import { Router, Response, Request } from 'express';
 import { AuthenticatedRequest, authenticateJWT } from '@/middlewares/auth.middleware';
 import { FamilyController } from '@/controllers/family.controller';
+import JWTService from '@/services/jwt.service';
 
 const familyRoutes = Router();
 
@@ -323,20 +324,70 @@ familyRoutes.post(
 );
 
 
-// this is for mail accept 
-familyRoutes.get('/invitations/:invitationId/accept/:userId', async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+/**
+ * @route GET /family/invitations/:invitationId/accept/:userId/:oneTimeToken
+ * @description
+ * Accept a family invitation sent via email.  
+ * This endpoint verifies the one-time token (OTT) associated with the invitation.  
+ * If the token is valid and unused, the user is added to the family group.
+ *
+ * **Flow:**
+ * 1. Validate required parameters: `invitationId`, `userId`, `oneTimeToken`.
+ * 2. Verify one-time token using JWTService.
+ * 3. Reject if token is expired or marked as used (`payload.isUsed === true`).
+ * 4. Attach the authenticated user to `req.user`.
+ * 5. Call `FamilyController.acceptInvitation()` to complete the acceptance process.
+ * 6. Respond back with success message and status.
+ *
+ * @param {string} req.params.invitationId - The unique ID of the family invitation.
+ * @param {string} req.params.userId - ID of the user who is accepting the invitation.
+ * @param {string} req.params.oneTimeToken - One-time JWT token sent in invitation email.
+ *
+ * @returns {201 Created} Invitation accepted successfully.
+ * @returns {400 Bad Request} Missing required parameters.
+ * @returns {401 Unauthorized} Token expired or already used.
+ * @returns {500 Internal Server Error} Server-side error.
+ *
+ * @example
+ * // Client-side usage:
+ * // Suppose user receives an email link like:
+ * // https://your-domain.com/family/invitations/INV12345/accept/USER789/TOKEN_ABC
+ *
+ * fetch("https://your-domain.com/family/invitations/INV12345/accept/USER789/TOKEN_ABC")
+ *   .then(res => res.json())
+ *   .then(data => console.log(data))
+ *   .catch(err => console.error(err));
+ *
+ * // Successful Response:
+ * {
+ *   "message": "Invitation accepted successfully",
+ *   "status": true
+ * }
+ *
+ * // If token expired:
+ * {
+ *   "message": "One time invitation is expired!",
+ *   "error": "One time invitation is expired!"
+ * }
+ */
+familyRoutes.get('/invitations/:invitationId/accept/:userId/:oneTimeToken', async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
   try {
-    const { invitationId, userId } = req.params
-    if (!invitationId || !userId) {
+    const { invitationId, userId, oneTimeToken } = req.params
+    if (!invitationId || !userId || !oneTimeToken) {
       return res.status(400).json({
         success: false,
-        message: 'Invitation ID and User ID are required',
+        message: 'Invitation ID, One Time Token  and User ID are required',
       });
     }
+    const payload = await JWTService.verifyAccessToken(oneTimeToken)
+    if (payload.isUsed) {
+      return res.status(401).json({ message: 'One time invitation is expired!', error: 'One time invitation is expired!' })
+    }
     req.user = { userId }
-    return await FamilyController.acceptInvitation as any
+    const response = await FamilyController.acceptInvitation(req, res) as any
+    return res.status(201).json({ message: response.message, status: response.status })
   } catch (error) {
-    console.log('Error in iinvitation with mail :: ', (error as Error).message)
+    console.log('Error in invitation with mail :: ', (error as Error).message)
     return res.status(500).json({
       message: (process.env.NODE_ENV) ? (error as Error).message : 'Something went wrong!'
     })

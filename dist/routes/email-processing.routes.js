@@ -1,11 +1,12 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { GoogleService } from '@services/google.service';
-import { AIService } from '@services/ai.service';
-import { FinancialDataService } from '@services/financial-data.service';
-import { GmailAttachmentService } from '@services/gmail-attachment.service';
-import { EncryptionService } from '@services/encryption.service';
-import { convertBigIntToString } from '@/config/utils';
+import { GoogleService } from '../services/google.service.js';
+import { AIService } from '../services/ai.service.js';
+import { FinancialDataService } from '../services/financial-data.service.js';
+import { GmailAttachmentService } from '../services/gmail-attachment.service.js';
+import { EncryptionService } from '../services/encryption.service.js';
+import { convertBigIntToString } from '../config/utils.js';
+import { authenticateJWT } from '../middlewares/auth.middleware.js';
 const router = Router();
 const prisma = new PrismaClient();
 const encryptionService = new EncryptionService();
@@ -22,9 +23,10 @@ const googleService = new GoogleService({
  * POST /api/email-processing/analyze/:userId
  * Analyze emails with attachments
  */
-router.post('/analyze/:userId', async (req, res) => {
+router.post('/analyze', authenticateJWT, async (req, res) => {
     try {
-        const { userId } = req.params;
+        // const { userId } = req.params;
+        const userId = req.user?.userId;
         const { limit } = req.body;
         if (!userId) {
             res.status(400).json({
@@ -35,6 +37,35 @@ router.post('/analyze/:userId', async (req, res) => {
         }
         console.log(`🚀 Starting financial email analysis for user: ${userId}`);
         googleService.setUserId(userId);
+        // ✅ 1️⃣ Fetch user and expiry field
+        const user = await prisma.user.findUnique({
+            where: { id: userId },
+            select: { expire_email_processing: true },
+        });
+        if (!user) {
+            res.status(404).json({
+                success: false,
+                message: 'User not found',
+            });
+            return;
+        }
+        const now = new Date();
+        const expiry = user.expire_email_processing
+            ? new Date(user.expire_email_processing)
+            : null;
+        // ✅ 2️⃣ If expiry exists and is in the future → deny processing
+        if (expiry && expiry > now) {
+            const remainingDays = Math.ceil((expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            res.status(200).json({
+                success: false,
+                message: `Email analysis was already processed recently. Please try again after ${remainingDays} days.`,
+            });
+            return;
+        }
+        // ✅ 3️⃣ Set new expiry (90 days from now)
+        const ninetyDays = 90 * 24 * 60 * 60 * 1000;
+        const newExpiry = new Date(now.getTime() + ninetyDays);
+        console.log(`🕒 Updated expire_email_processing to ${newExpiry.toISOString()}`);
         const loaded = await googleService.loadCredentialsFromDatabase(userId);
         if (!loaded) {
             res.status(401).json({
@@ -46,9 +77,12 @@ router.post('/analyze/:userId', async (req, res) => {
         const emailsResult = await googleService.listEmails(limit || 20);
         const emails = emailsResult.emails;
         console.log(`📧 Fetched ${emails.length} emails from Gmail`);
+        const financialEmailIds = await aiService.classifyEmailSubjects(emails);
+        console.log(`${financialEmailIds.length} Financial email found`);
+        const filteredEmails = emails.filter(email => financialEmailIds.includes(email.id));
+        // console.log("filteredEmails :: ",filteredEmails,)
         const results = [];
-        
-        for (const email of emails) {
+        for (const email of filteredEmails) {
             try {
                 const lockedAttachmentsPassword = await aiService.guessPassword(email.subject, email.body, userId);
                 console.log('Locked Attachment password :: ', lockedAttachmentsPassword);
@@ -113,6 +147,11 @@ router.post('/analyze/:userId', async (req, res) => {
             await new Promise((resolve) => setTimeout(resolve, 500));
         }
         const processed = results.filter((r) => r.processed).length;
+        // update the expiry date in user schema
+        await prisma.user.update({
+            where: { id: userId },
+            data: { expire_email_processing: newExpiry },
+        });
         res.json({
             success: true,
             message: `Processed ${processed} out of ${results.length} emails`,

@@ -1,8 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import passwordGeneratorService from './password-generator.service';
-import { prisma } from '@/config/database';
+import passwordGeneratorService from './password-generator.service.js';
+import { prisma } from '../config/database.js';
 /**
  * GmailAttachmentService
  *

@@ -2,11 +2,11 @@
  * Vault Routes Module
  * Handles asset management operations including retrieval, status updates, and modifications
  */
-import { authenticateJWT } from "@/middlewares/auth.middleware";
-import { AIService } from "@/services/ai.service";
-import { EncryptionService } from "@/services/encryption.service";
-import { FinancialDataService } from "@/services/financial-data.service";
-import { GmailAttachmentService } from "@/services/gmail-attachment.service";
+import { authenticateJWT } from "../middlewares/auth.middleware.js";
+import { AIService } from "../services/ai.service.js";
+import { EncryptionService } from "../services/encryption.service.js";
+import { FinancialDataService } from "../services/financial-data.service.js";
+import { GmailAttachmentService } from "../services/gmail-attachment.service.js";
 import { PrismaClient } from "@prisma/client";
 import { Router } from "express";
 // ============================================================================
@@ -52,14 +52,23 @@ const vaultRoutes = Router();
  *   "success": true,
  *   "data": [
  *     { "id": "asset1", "name": "Property", "status": "active", "value": 100000 },
- *     { "id": "asset2", "name": "Vehicle", "status": "pending", "value": 50000 }
+ *     { "id": "asset2", "name": "Vehicle", "status": "inactive", "value": 50000 }
  *   ]
  * }
  */
 vaultRoutes.get('/get-assets/', authenticateJWT, async (req, res) => {
     try {
         const assets = await financialDataService.getAssetsByUserId(req.user?.userId);
-        return res.status(200).json({ success: true, data: assets });
+        // Add extra fields to each asset
+        const enrichedAssets = assets.map(asset => ({
+            ...asset,
+            source: "AI",
+            submitted: true,
+        }));
+        return res.status(200).json({
+            success: true,
+            data: enrichedAssets
+        });
     }
     catch (error) {
         console.error('Error fetching assets:', error);
@@ -147,7 +156,7 @@ vaultRoutes.get('/get-asset/:assetId', authenticateJWT, async (req, res) => {
  *
  * @description
  * Allowed status values:
- * - active, inactive, pending, approved, rejected
+ * - active, inactive, inactive, approved, rejected
  * - under_review, needs_attention, verified, unverified
  * - flagged, escalated, resolved, closed, open
  * - in_progress, on_hold, completed, canceled
@@ -159,7 +168,7 @@ vaultRoutes.patch('/status-asset/:assetId', authenticateJWT, async (req, res) =>
         const { status } = req.body;
         // Allowed asset statuses
         const allowedStatus = [
-            'active', 'inactive', 'pending', 'approved', 'rejected',
+            'active', 'inactive', 'inactive', 'approved', 'rejected',
             'under_review', 'needs_attention', 'verified', 'unverified',
             'flagged', 'escalated', 'resolved', 'closed', 'open',
             'in_progress', 'on_hold', 'completed', 'canceled',

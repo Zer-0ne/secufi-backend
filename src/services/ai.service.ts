@@ -16,6 +16,7 @@ interface EnhancedFinancialData {
   amount: number | null;
   currency: string;
   merchant: string;
+  balance:string;
   description: string;
   date: string;
   accountNumber: string | null;
@@ -39,14 +40,19 @@ interface EnhancedFinancialData {
   folioNumber?: string;
   fundName?: string;
 
-  extractedUserFields?: {
-    name?: string;
-    phone?: string;
-    email?: string;
-    address?: string;
-    pan_number?: string;
-    aadhar_number?: string;
-    date_of_birth?: string;
+  requiredUserFields?: {
+    name?: boolean;
+    phone?: boolean;
+    email?: boolean;
+    address?: boolean;
+    pan_number?: boolean;
+    aadhar_number?: boolean;
+    date_of_birth?: boolean;
+    crn_number?: boolean;
+    account_number?: boolean;
+    ifsc_code?: boolean;
+    policy_number?: boolean;
+    folio_number?: boolean;
   };
 
   // Financial metadata
@@ -94,21 +100,47 @@ interface PDFAnalysisRequest {
 
 interface AnalysisResult {
   success: boolean;
+
   extractedData: {
-    transactionType: string;
+    // Basic transaction data
+    transactionType?: any;
     amount?: number;
-    currency?: string;
+    currency: string;
     merchant?: string;
     description?: string;
     date?: string;
-    accountNumber?: string;
+    accountNumber: string;
     confidence: number;
+
+    // Enhanced classification
+    assetCategory: any;
+    assetType: string;
+    assetSubType: string;
+    status: string;
+
+    // Bank details
+    bankName?: string;
+    ifscCode?: string;
+    branchName?: string;
+
+    // Insurance / Investment specific
+    policyNumber?: string;
+    folioNumber?: string;
+    fundName?: string;
+
+    // Complete metadata
+    financialMetadata: Record<string, any>;
+    balance: any;
+    total_value: any;
   };
-  keyPoints?: string[];
-  summary?: string;
-  issues: string[]
-  required_fields: string[]
+
+  keyPoints: string[];
+  summary: string;
+  issues: string[];
+  required_fields: string[];
+  attachmentAnalyses:any
 }
+
 
 export class AIService {
   private openaiKey: string;
@@ -418,18 +450,23 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
  */
   private async checkMissingUserFields(
     userId: string,
-    extractedFields: {
-      name?: string;
-      phone?: string;
-      email?: string;
-      address?: string;
-      pan_number?: string;
-      aadhar_number?: string;
-      date_of_birth?: string;
+    requiredFields: {
+      name?: boolean;
+      phone?: boolean;
+      email?: boolean;
+      address?: boolean;
+      pan_number?: boolean;
+      aadhar_number?: boolean;
+      date_of_birth?: boolean;
+      crn_number?: boolean;
+      account_number?: boolean;
+      ifsc_code?: boolean;
+      policy_number?: boolean;
+      folio_number?: boolean;
     }
   ): Promise<string[]> {
     try {
-      // Fetch current user data
+      // Fetch user profile from database
       const user = await prisma.user.findUnique({
         where: { id: userId },
         select: {
@@ -440,48 +477,51 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
           pan_number: true,
           aadhar_number: true,
           date_of_birth: true,
+          crn_number: true,
         },
       });
 
       if (!user) {
-        console.warn(`User ${userId} not found`);
+        console.warn(`⚠️ User not found: ${userId}`);
         return [];
       }
 
       const missingFields: string[] = [];
 
-      // Define field mappings
-      const fieldMappings: Array<{
-        extractedKey: keyof typeof extractedFields;
-        userKey: keyof typeof user;
-        displayName: string;
-      }> = [
-          { extractedKey: 'name', userKey: 'name', displayName: 'name' },
-          { extractedKey: 'phone', userKey: 'phone', displayName: 'phone' },
-          { extractedKey: 'email', userKey: 'email', displayName: 'email' },
-          { extractedKey: 'address', userKey: 'address', displayName: 'address' },
-          { extractedKey: 'pan_number', userKey: 'pan_number', displayName: 'pan_number' },
-          { extractedKey: 'aadhar_number', userKey: 'aadhar_number', displayName: 'aadhar_number' },
-          { extractedKey: 'date_of_birth', userKey: 'date_of_birth', displayName: 'date_of_birth' },
-        ];
+      // Map of required fields to user profile fields
+      const fieldMap: Record<string, keyof typeof user> = {
+        name: 'name',
+        phone: 'phone',
+        email: 'email',
+        address: 'address',
+        pan_number: 'pan_number',
+        aadhar_number: 'aadhar_number',
+        date_of_birth: 'date_of_birth',
+        crn_number: 'crn_number',
+      };
 
-      // Check each field
-      for (const mapping of fieldMappings) {
-        const extractedValue = extractedFields[mapping.extractedKey];
-        const userValue = user[mapping.userKey];
+      // Check each required field
+      Object.entries(requiredFields).forEach(([field, isRequired]) => {
+        if (isRequired === true) {
+          const userField = fieldMap[field];
 
-        // If extracted field has value but user field is empty/null
-        if (extractedValue && !userValue) {
-          missingFields.push(mapping.displayName);
-          console.log(
-            `📋 Missing field detected: ${mapping.displayName} = "${extractedValue}" (not in user profile)`
-          );
+          // If field is required but user doesn't have it
+          if (userField && !user[userField]) {
+            missingFields.push(field);
+            console.log(`📋 Missing: ${field} (required but not in profile)`);
+          }
         }
+      });
+
+      if (missingFields.length > 0) {
+        console.log(`⚠️ Total missing fields: ${missingFields.length}`, missingFields);
+      } else {
+        console.log('✅ All required fields present in user profile');
       }
 
       return missingFields;
     } catch (error) {
-      console.error('Error checking missing user fields:', error);
+      console.error('❌ Error checking missing fields:', error);
       return [];
     }
   }
@@ -739,15 +779,19 @@ Example 3 - Mutual Fund Statement:
     "returnsPercentage": 25.0,
     "appreciationRate": 25.0
   },
-   "extractedUserFields": {
-    "name": "customer name if found",
-    "phone": "phone number if found",
-    "email": "email if found",
-    "address": "address if found",
-    "pan_number": "PAN if found",
-    "aadhar_number": "Aadhar if found",
-    "date_of_birth": "DOB if found"
-    "crn_number":"CRN if found"
+   "requiredUserFields": {
+    "name": boolean,
+    "phone": boolean,
+    "email": boolean,
+    "address": boolean,
+    "pan_number": boolean,
+    "aadhar_number": boolean,
+    "date_of_birth": boolean,
+    "crn_number": boolean,
+    "account_number": boolean,
+    "ifsc_code": boolean,
+    "policy_number": boolean,
+    "folio_number": boolean
   },
   "keyPoints": [
     "Current investment value: ₹2,50,000",
@@ -787,7 +831,7 @@ Example 4 - Home Loan EMI:
   ]
 }
 
-**IMPORTANT**: In "extractedUserFields", extract ANY personal information found in the email, attachments, or content that relates to the user (name, phone, email, address, PAN, Aadhar, DOB, etc.). If not found, set to null.
+IMPORTANT: In "requiredUserFields", identify which personal/account fields are REQUIRED or MENTIONED in the email/attachments. Set to true if the field is required/requested, false otherwise. Example: If email asks for CRN number, set "crn_number": true.
 
 Now analyze the provided email and return structured JSON:`;
 
@@ -813,10 +857,14 @@ Now analyze the provided email and return structured JSON:`;
 
       const extracted: EnhancedFinancialData = JSON.parse(jsonMatch[0]);
       const issues = await this.validateExtractedData(extracted, data.attachmentContents);;
+      console.log('extracted.requiredUserFields :: ', extracted.requiredUserFields);
+
       const requiredFields = await this.checkMissingUserFields(
         userId,
-        extracted.extractedUserFields || {}
+        extracted.requiredUserFields || {}
       );
+
+      console.log('requiredFields :: ',requiredFields)
 
       if (issues.length > 0) {
         console.log('⚠️ Validation Issues Found:', issues);
@@ -828,7 +876,7 @@ Now analyze the provided email and return structured JSON:`;
         success: true,
         extractedData: {
           // Basic transaction data
-          transactionType: extracted.transactionType || 'other',
+          transactionType: extracted.transactionType || 'other' as any,
           // amount: extracted.amount,
           currency: extracted.currency || 'INR',
           merchant: extracted.merchant,
@@ -861,7 +909,7 @@ Now analyze the provided email and return structured JSON:`;
           total_value: extracted.financialMetadata?.totalValue ||
             extracted.financialMetadata?.coverageAmount ||
             extracted.amount, // fallback
-        },
+        } as any,
         keyPoints: extracted.keyPoints || [],
         summary: this.generateSmartSummary(extracted),
         attachmentAnalyses,
@@ -1511,16 +1559,16 @@ If NO issues found, return: {"issues": []}
         currency,
         merchant,
         description: data.emailContent.substring(0, 100),
-        date,
+        date:data as any,
         confidence,
-      },
+      } as any,
       keyPoints: [
         `Transaction Type: ${transactionType}`,
         amount ? `Amount: ${currency} ${amount}` : 'No amount found',
         `Merchant: ${merchant}`,
       ],
       summary: `Identified ${transactionType} with ${confidence}% confidence`,
-    };
+    } as any;
   }
 
   /**
@@ -1567,10 +1615,10 @@ Return JSON format:
         extractedData: {
           transactionType: extracted.documentType || 'other',
           confidence: extracted.dataQuality || 50,
-        },
+        } as any,
         keyPoints: extracted.keyFindings,
         summary: `${extracted.documentType} with ${extracted.keyFigures.length} financial figures identified`,
-      };
+      } as any;
     } catch (error) {
       console.error('Error analyzing PDF document:', error);
       return this.fallbackPDFAnalysis(data);
@@ -1683,15 +1731,15 @@ Response (just password or "false"):`;
     return {
       success: true,
       extractedData: {
-        transactionType: docType,
+        transactionType: docType as any,
         confidence: 70,
-      },
+      } as any,
       keyPoints: [
         `Document Type: ${docType}`,
         `Text Length: ${data.text.length} chars`,
       ],
       summary: `${docType} document analyzed`,
-    };
+    } as any;
   }
 
   /**
@@ -1816,12 +1864,12 @@ Response (just password or "false"):`;
       if (!response.ok) {
         const error = await response.json();
         console.error('OpenAI error:', error);
-        throw new Error(`OpenAI failed: ${response.status} - ${error.error?.message || 'Unknown error'}`);
+        throw new Error(`OpenAI failed: ${response.status} - ${(error as any).error?.message || 'Unknown error'}`);
       }
 
       const data = await response.json();
       console.log('✓ OpenAI response received');
-      return data.choices[0].message.content || '';
+      return (data as any).choices[0].message.content || '';
     } catch (error) {
       console.error('OpenAI API failed:', error);
       throw error;

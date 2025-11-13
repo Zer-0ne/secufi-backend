@@ -134,6 +134,8 @@ export class FinancialDataService {
         policy_number: true,
         fund_name: true,
         folio_number: true,
+        required_fields:true,
+        crn_number:true,
 
         // ✅ References
         transaction_id: true,
@@ -223,6 +225,7 @@ export class FinancialDataService {
 
         // ✅ Issues
         issues: true,
+        crn_number:true,
 
         // ✅ Timestamps
         created_at: true,
@@ -318,6 +321,7 @@ export class FinancialDataService {
         // ✅ Timestamps
         created_at: true,
         updated_at: true,
+        crn_number:true,
 
         // ❌ EXCLUDED - Document/Attachment Fields
         document_type: false,
@@ -383,6 +387,7 @@ export class FinancialDataService {
       "policy_number",
       "fund_name",
       "folio_number",
+      "crn_number",
       "issues",
       // ❌ EXCLUDED: document_type, document_metadata, file_name, file_size, mime_type, file_content
     ];
@@ -433,6 +438,7 @@ export class FinancialDataService {
         policy_number: true,
         fund_name: true,
         folio_number: true,
+        crn_number:true,
 
         // ✅ References
         transaction_id: true,
@@ -559,7 +565,7 @@ export class FinancialDataService {
           // Save to Asset with ALL new fields
           const assetRecord = await this.prisma.asset.create({
             data: {
-              user_id: userId,
+              user_id: userId!,
               name: `${extracted.assetCategory?.toUpperCase()}: ${extracted.merchant || attachment.filename}`,
 
               // 🎯 3-Category Classification
@@ -568,9 +574,9 @@ export class FinancialDataService {
 
               // 🏦 Bank Details
               account_number: extracted.accountNumber,
-              ifsc_code: extracted.ifscCode,
-              branch_name: extracted.branchName,
-              bank_name: extracted.bankName,
+              ifsc_code: extracted.ifscCode!,
+              branch_name: extracted.branchName!,
+              bank_name: extracted.bankName!,
 
               // 💰 Financial Values
               balance: extracted.amount
@@ -593,9 +599,9 @@ export class FinancialDataService {
               last_updated: new Date(),
 
               // 💳 Insurance/Investment Fields
-              policy_number: extracted.policyNumber,
-              folio_number: extracted.folioNumber,
-              fund_name: extracted.fundName,
+              policy_number: extracted.policyNumber!,
+              folio_number: extracted.folioNumber!,
+              fund_name: extracted.fundName!,
 
               // 📄 Document Fields
               document_type: extracted.assetType,
@@ -638,7 +644,7 @@ export class FinancialDataService {
 
               email_id: emailData.emailId,
               issues: emailAnalysis.issues || [],
-              required_fields: emailAnalysis.requiredFields || [],
+              required_fields: emailAnalysis.required_fields || [],
             },
           });
           assetIds.push(assetRecord.id);
@@ -660,18 +666,18 @@ export class FinancialDataService {
       // Create transaction
       const transaction = await this.prisma.transaction.create({
         data: {
-          user_id: userId,
-          email_id: emailData.emailId,
-          subject: emailData.subject,
-          sender: emailData.from,
+          user_id: userId!,
+          email_id: emailData.emailId!,
+          subject: emailData.subject!,
+          sender: emailData.from!,
           recipient: 'User',
           amount: emailAnalysis.extractedData.amount
             ? parseFloat(String(emailAnalysis.extractedData.amount))
             : null,
           currency: emailAnalysis.extractedData.currency || 'INR',
-          transaction_type: emailAnalysis.extractedData.transactionType,
-          merchant: emailAnalysis.extractedData.merchant,
-          description: emailAnalysis.extractedData.description,
+          transaction_type: emailAnalysis.extractedData.transactionType!,
+          merchant: emailAnalysis.extractedData.merchant!,
+          description: emailAnalysis.extractedData.description!,
           transaction_date: emailAnalysis.extractedData.date
             ? new Date(emailAnalysis.extractedData.date)
             : new Date(),
@@ -721,448 +727,6 @@ export class FinancialDataService {
         error: error instanceof Error ? error.message : 'Unknown error',
       };
     }
-  }
-
-
-  /**
-   * Process individual attachment file from file system
-   * 
-   * Handles direct file processing (not from Gmail API):
-   * 1. Reads file content based on mime type
-   * 2. Sends content to AI for analysis
-   * 3. Saves to PdfDocument table
-   * 4. Saves to Document table
-   * 5. Generates markdown and HTML representation
-   * 
-   * @param {string} filePath - Absolute path to the attachment file
-   * @param {string} userId - User ID who owns this file
-   * @returns {Promise<any | null>} Analysis result with document IDs or null if confidence too low
-   * 
-   * @private
-   * @throws {Error} If file reading or database operations fail
-   * 
-   * @example
-   * ```
-   * const result = await service.processAttachmentFile(
-   *   '/uploads/invoice.pdf',
-   *   'user-123'
-   * );
-   * if (result) {
-   *   console.log(`PDF Document ID: ${result.pdfDocumentId}`);
-   *   console.log(`Document ID: ${result.documentId}`);
-   * }
-   * ```
-   * 
-   * @remarks
-   * - Files with confidence < 30% are skipped
-   * - Generates both markdown and HTML representations
-   * - Does NOT save to Asset table (only PdfDocument and Document)
-   * - Suitable for batch file processing from uploads folder
-   */
-  private async processAttachmentFile(
-    filePath: string,
-    userId: string
-  ): Promise<any | null> {
-    try {
-      console.log(`📄 Analyzing attachment: ${filePath}`);
-      const fileName = path.basename(filePath);
-      const fileStats = fs.statSync(filePath);
-      const fileSize = fileStats.size;
-      const mimeType = this.getMimeType(filePath);
-
-      // Read file content based on type
-      const fileContent = this.readFileContent(filePath);
-
-      // 🤖 AI ANALYSIS - Send extracted content to AI
-      console.log(`🤖 Sending content to AI for analysis...`);
-      const analysis = await this.aiService.analyzePDFDocument({
-        text: fileContent,
-        documentType: this.guessDocumentType(fileName),
-      });
-
-      console.log(`✅ AI Analysis completed:`, {
-        confidence: analysis.extractedData?.confidence,
-        transactionType: analysis.extractedData?.transactionType,
-        amount: analysis.extractedData?.amount,
-      });
-
-      // Skip low confidence results
-      if (analysis.extractedData.confidence < 30) {
-        console.log(`⚠️  Low confidence (${analysis.extractedData.confidence}%), skipping`);
-        return null;
-      }
-
-      // Map transaction type to standard format
-      let docType: any = analysis.extractedData.transactionType || 'other';
-      const typeMap: Record<string, string> = {
-        invoice: 'invoice',
-        receipt: 'receipt',
-        statement: 'statement',
-        tax: 'tax',
-        creditcard: 'credit_card',
-        bill: 'bill',
-        other: 'other',
-      };
-      docType = typeMap[docType] || 'other';
-
-      // Create markdown representation
-      const markdownContent = this.createMarkdownContent(
-        fileName,
-        fileSize,
-        mimeType,
-        docType,
-        analysis
-      );
-
-      // Save to PdfDocument table
-      const pdfDocument = await this.prisma.pdfDocument.create({
-        data: {
-          userId: userId,
-          filename: fileName,
-          originalFilename: fileName,
-          filePath: null,
-          fileSize: BigInt(fileSize),
-          mimeType: mimeType,
-          parsingStatus: 'completed',
-          extractedText: markdownContent.substring(0, 10000), // Limit to 10k chars
-          extractedData: analysis.extractedData,
-          pageCount: this.estimatePageCount(markdownContent),
-          uploadSource: 'gmail',
-        },
-      });
-
-      // Save to Document table
-      const document = await this.prisma.document.create({
-        data: {
-          userId: userId,
-          filename: fileName,
-          originalFilename: fileName,
-          filePath: null,
-          fileSize: BigInt(fileSize),
-          mimeType: mimeType,
-          parsingStatus: 'completed',
-          extractedText: markdownContent.substring(0, 10000),
-          documentType: docType,
-          documentCategory: this.guessDocumentType(fileName),
-          confidenceScore: analysis.extractedData.confidence,
-          extractedData: analysis.extractedData,
-          dataQualityScore: analysis.extractedData.confidence,
-          pageCount: this.estimatePageCount(markdownContent),
-          aiModelUsed: 'openrouter-auto',
-          processingMethod: 'ai',
-        },
-      });
-
-      console.log(`✅ Attachment analyzed: ${pdfDocument.id}`);
-
-      // Convert markdown to HTML for display
-      const htmlContent = this.markdownToHtml(markdownContent);
-
-      return {
-        pdfDocumentId: pdfDocument.id,
-        documentId: document.id,
-        fileName,
-        fileSize: `${(fileSize / 1024).toFixed(2)}KB`,
-        mimeType: mimeType,
-        htmlContent,
-        analysis: {
-          extractedData: analysis.extractedData,
-          summary: analysis.summary,
-          keyPoints: analysis.keyPoints,
-        },
-      };
-    } catch (error) {
-      console.error('❌ Error processing attachment file:', error);
-      return null;
-    }
-  }
-
-  /**
-   * Read file content based on mime type
-   * 
-   * Handles different file types:
-   * - PDF, Images: Returns placeholder text (actual extraction done by parser service)
-   * - Excel, Spreadsheets: Returns placeholder text
-   * - CSV: Reads first 2000 characters
-   * - Text files: Reads first 1000 characters
-   * 
-   * @param {string} filePath - Path to the file
-   * @returns {string} Extracted or placeholder content
-   * 
-   * @private
-   * @example
-   * ```
-   * const content = this.readFileContent('/uploads/invoice.pdf');
-   * console.log(content);
-   * // Output: "File: invoice.pdf\nType: application/pdf\n\nContent extracted..."
-   * ```
-   */
-  private readFileContent(filePath: string): string {
-    try {
-      const fileName = path.basename(filePath);
-      const ext = path.extname(filePath).toLowerCase();
-
-      // Binary files (PDF, Images) - Return placeholder
-      if (ext === '.pdf' || ext.match(/\.(jpg|jpeg|png|gif|tiff)$/i)) {
-        return `File: ${fileName}\nType: ${this.getMimeType(filePath)}\n\nContent extracted and processed by AI.`;
-      }
-
-      // Spreadsheet files
-      if (ext === '.xlsx' || ext === '.xls') {
-        return `Spreadsheet: ${fileName}\nContent extracted and processed by AI.`;
-      }
-
-      // CSV files - Try to read content
-      if (ext === '.csv') {
-        try {
-          const buffer = fs.readFileSync(filePath);
-          const content = buffer.toString('utf-8');
-          return content.substring(0, 2000); // First 2000 chars
-        } catch (e) {
-          return `CSV File: ${fileName}\nContent extracted by AI.`;
-        }
-      }
-
-      // Text files - Try to read content
-      try {
-        const buffer = fs.readFileSync(filePath);
-        const content = buffer.toString('utf-8');
-        return content.substring(0, 1000); // First 1000 chars
-      } catch (e) {
-        return `File: ${fileName}\nContent extracted by AI.`;
-      }
-    } catch (error) {
-      console.error('Error reading file content:', error);
-      return '';
-    }
-  }
-
-  /**
-   * Create markdown content with extracted data
-   * 
-   * Generates a structured markdown document containing:
-   * - Document information table
-   * - Analysis results
-   * - Summary text
-   * - Key points list
-   * - Financial information (if available)
-   * - Processing metadata
-   * 
-   * @param {string} fileName - Name of the file
-   * @param {number} fileSize - File size in bytes
-   * @param {string} mimeType - MIME type of the file
-   * @param {string} docType - Document type classification
-   * @param {any} analysis - AI analysis results
-   * @returns {string} Formatted markdown content
-   * 
-   * @private
-   * @example
-   * ```
-   * const markdown = this.createMarkdownContent(
-   *   'invoice.pdf',
-   *   102400,
-   *   'application/pdf',
-   *   'invoice',
-   *   aiAnalysis
-   * );
-   * ```
-   */
-  private createMarkdownContent(
-    fileName: string,
-    fileSize: number,
-    mimeType: string,
-    docType: string,
-    analysis: any
-  ): string {
-    const fileSizeKB = (fileSize / 1024).toFixed(2);
-
-    let markdown = `# ${fileName}
-
-## Document Information
-
-| Property | Value |
-|----------|-------|
-| File Name | ${fileName} |
-| File Size | ${fileSizeKB}KB |
-| MIME Type | ${mimeType} |
-| Document Type | ${docType} |
-| Status | ✓ Processed |
-
-## Analysis Results
-
-| Metric | Value |
-|--------|-------|
-| Transaction Type | ${analysis.extractedData.transactionType} |
-| Confidence Score | ${analysis.extractedData.confidence}% |
-| Quality Score | ${analysis.extractedData.confidence}% |
-
-## Summary
-
-${analysis.summary || 'Financial document successfully analyzed.'}
-
-`;
-
-    // Add key points if available
-    if (analysis.keyPoints && analysis.keyPoints.length > 0) {
-      markdown += `## Key Points\n\n`;
-      analysis.keyPoints.forEach((point: string) => {
-        markdown += `- ${point}\n`;
-      });
-      markdown += '\n';
-    }
-
-    // Add financial information if available
-    if (analysis.extractedData.amount) {
-      markdown += `## Financial Information\n\n`;
-      markdown += `- **Amount:** ${analysis.extractedData.currency} ${analysis.extractedData.amount}\n`;
-
-      if (analysis.extractedData.merchant) {
-        markdown += `- **Merchant:** ${analysis.extractedData.merchant}\n`;
-      }
-
-      if (analysis.extractedData.date) {
-        markdown += `- **Date:** ${analysis.extractedData.date}\n`;
-      }
-
-      if (analysis.extractedData.description) {
-        markdown += `- **Description:** ${analysis.extractedData.description}\n`;
-      }
-
-      markdown += '\n';
-    }
-
-    // Add processing metadata
-    markdown += `## Processing Metadata
-
-- **Processed At:** ${new Date().toISOString()}
-- **AI Model:** OpenRouter Auto
-- **Processing Method:** AI Analysis`;
-
-    return markdown;
-  }
-
-  /**
-   * Convert markdown to styled HTML
-   * 
-   * Converts markdown syntax to HTML with professional styling:
-   * - Headers (H1, H2, H3)
-   * - Tables with hover effects
-   * - Lists (bulleted)
-   * - Bold and italic text
-   * - Responsive design
-   * 
-   * @param {string} markdown - Markdown content to convert
-   * @returns {string} Styled HTML content
-   * 
-   * @private
-   * @example
-   * ```
-   * const html = this.markdownToHtml('# Title\n\nContent here...');
-   * // Returns: <div style="..."><h1>Title</h1><p>Content here...</p></div>
-   * ```
-   */
-  private markdownToHtml(markdown: string): string {
-    return `<div style="max-width: 900px; margin: 0 auto; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333;">
-${markdown
-        .split('\n')
-        .map((line) => {
-          // Headers
-          if (line.startsWith('# ')) {
-            return `<h1 style="font-size: 28px; font-weight: bold; margin: 30px 0 15px 0; color: #1a1a1a; border-bottom: 3px solid #007bff; padding-bottom: 10px;">${line.substring(2)}</h1>`;
-          }
-          if (line.startsWith('## ')) {
-            return `<h2 style="font-size: 22px; font-weight: bold; margin: 25px 0 12px 0; color: #0056b3;">${line.substring(3)}</h2>`;
-          }
-          if (line.startsWith('### ')) {
-            return `<h3 style="font-size: 18px; font-weight: bold; margin: 20px 0 10px 0; color: #0056b3;">${line.substring(4)}</h3>`;
-          }
-
-          // Tables
-          if (line.startsWith('| ')) {
-            if (line.includes('---') || line.includes('---')) {
-              return ''; // Skip separator row
-            }
-
-            const cells = line
-              .split('|')
-              .map((cell) => cell.trim())
-              .filter((cell) => cell.length > 0);
-
-            const isHeader = line.includes('---');
-
-            const cellHTML = cells
-              .map((cell) => {
-                const tag = isHeader ? 'th' : 'td';
-                return `<${tag} style="border: 1px solid #ddd; padding: 12px; text-align: left;">${cell}</${tag}>`;
-              })
-              .join('');
-
-            return `<tr>${cellHTML}</tr>`;
-          }
-
-          // List items
-          if (line.startsWith('- ')) {
-            return `<li style="margin: 8px 0; margin-left: 20px;">${line.substring(2)}</li>`;
-          }
-
-          // Bold and italic text
-          let htmlLine = line
-            .replace(
-              /\*\*(.*?)\*\*/g,
-              '<strong style="font-weight: bold; color: #0056b3;">$1</strong>'
-            )
-            .replace(
-              /__(.*?)__/g,
-              '<strong style="font-weight: bold; color: #0056b3;">$1</strong>'
-            )
-            .replace(/\*(.*?)\*/g, '<em style="font-style: italic;">$1</em>');
-
-          if (htmlLine.trim().length === 0) {
-            return '<br style="margin: 10px 0;">';
-          }
-
-          if (!htmlLine.includes('<') && htmlLine.trim().length > 0) {
-            return `<p style="margin: 12px 0; line-height: 1.8;">${htmlLine}</p>`;
-          }
-
-          return htmlLine;
-        })
-        .join('\n')}
-</div>
-
-<style>
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 15px 0;
-    background: white;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
-    border-radius: 5px;
-    overflow: hidden;
-  }
-  
-  thead tr {
-    background: #007bff;
-    color: white;
-  }
-  
-  tbody tr:nth-child(even) {
-    background: #f8f9fa;
-  }
-  
-  tbody tr:hover {
-    background: #e7f3ff;
-  }
-  
-  ul {
-    list-style-type: disc;
-    margin: 15px 0;
-  }
-  
-  li {
-    margin: 8px 0;
-  }
-</style>`;
   }
 
   /**

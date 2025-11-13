@@ -10,6 +10,7 @@ import smsRouter from './routes/sms.route';
 import vaultRoutes from './routes/vault.routes';
 import familyRoutes from './routes/family.routes';
 import assetSharingRouter from './routes/asset-sharing.routes';
+import deviceInfoRouter from './routes/get-device-info.route';
 
 // Load environment variables
 config();
@@ -89,6 +90,7 @@ app.get('/api/db-test', async (req: Request, res: Response) => {
 });
 
 // API Routes
+app.use('/',deviceInfoRouter)
 app.use('/api/google', googleRouter);
 app.use('/api/users', userRouter);
 app.use('/api/sms', smsRouter);

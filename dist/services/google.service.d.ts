@@ -1,6 +1,6 @@
 import { PrismaClient } from '@prisma/client';
-import { EncryptionService } from './encryption.service';
-import { GmailAttachmentService } from './gmail-attachment.service';
+import { EncryptionService } from './encryption.service.js';
+import { GmailAttachmentService } from './gmail-attachment.service.js';
 interface GoogleCredentials {
     accessToken: string;
     refreshToken: string;

@@ -1,8 +1,9 @@
 import { Router } from 'express';
 import { PrismaClient } from '@prisma/client';
-import { UserService } from '@services/user.service';
-import JWTService from '@/services/jwt.service';
-import { authenticateJWT } from '@/middlewares/auth.middleware';
+import { UserService } from '../services/user.service.js';
+import JWTService from '../services/jwt.service.js';
+import { authenticateJWT } from '../middlewares/auth.middleware.js';
+import { checkTempUser, deleteTempUser } from '../middlewares/temp-user.middleware.js';
 const userRouter = Router();
 export const prisma = new PrismaClient();
 const userService = new UserService(prisma);
@@ -10,8 +11,7 @@ const userService = new UserService(prisma);
  * POST /api/users
  * Create new user or return existing user
  */
-userRouter.post('/', async (req, res) => {
-    // console.log(req.body)
+userRouter.post('/', checkTempUser, async (req, res) => {
     try {
         const { email, name, password, user_type, phone, google_id, google_email, profile_picture, } = req.body;
         // Validate email
@@ -33,8 +33,10 @@ userRouter.post('/', async (req, res) => {
             });
             return;
         }
+        // ✅ Get temp user data from middleware (if exists)
+        const tempUserData = req.tempUserData;
         // Create or get user
-        const { user, isNewUser } = await userService.createOrGetUser({
+        const { user, isNewUser, hadTempData } = await userService.createOrGetUser({
             email,
             name,
             password,
@@ -43,7 +45,13 @@ userRouter.post('/', async (req, res) => {
             google_id,
             google_email,
             profile_picture,
+            tempUserData, // ✅ Pass temp user data
         });
+        // ✅ If user was created from temp data, delete temp record
+        if (isNewUser && hadTempData) {
+            await deleteTempUser(email);
+            console.log(`✅ Migrated temp user to User table: ${email}`);
+        }
         const accessToken = JWTService.signAccessToken({
             userId: user.id,
             email: user.email,
@@ -55,7 +63,9 @@ userRouter.post('/', async (req, res) => {
         const response = {
             success: true,
             message: isNewUser
-                ? 'User created successfully'
+                ? hadTempData
+                    ? 'User created successfully from invitation'
+                    : 'User created successfully'
                 : 'User already exists',
             user: userService.formatUserResponse(user),
             tokens: {
@@ -63,6 +73,7 @@ userRouter.post('/', async (req, res) => {
                 refreshToken,
             },
             isNewUser,
+            wasInvited: hadTempData, // ✅ NEW: Indicate if they were invited
         };
         res.status(isNewUser ? 201 : 200).json(response);
     }
@@ -106,7 +117,7 @@ userRouter.put('/kyc', authenticateJWT, async (req, res) => {
             return res.status(401).json({ success: false, message: 'Unauthorized: User not found' });
         }
         const { id: userId } = user;
-        const { phone, address, date_of_birth, pan_number } = req.body;
+        const { phone, address, date_of_birth, pan_number, name } = req.body;
         const { wants_to_update_details } = req.query;
         if (!phone || !date_of_birth || !pan_number) {
             return res.status(400).json({ success: false, message: 'phone, pan number, address and date_of_birth are required' });
@@ -120,11 +131,16 @@ userRouter.put('/kyc', authenticateJWT, async (req, res) => {
                 }
             });
         }
+        let senetize_dob = '';
+        if (date_of_birth.split('/')[0].length <= 2) {
+            senetize_dob = date_of_birth.split('/').reverse().join();
+        }
         // console.log(date_of_birth.toISOString().split("T")[0])
         const updatedUser = await userService.updateUser(userId.toString(), {
             phone,
             address,
-            date_of_birth: new Date(date_of_birth),
+            name,
+            date_of_birth: new Date(senetize_dob),
             is_verified: true,
             pan_number,
         });
@@ -140,6 +156,166 @@ userRouter.put('/kyc', authenticateJWT, async (req, res) => {
     catch (error) {
         console.error('Error updating profile:', error);
         return res.status(500).json({ success: false, message: 'Failed to update profile', error: error instanceof Error ? error.message : 'Unknown error' });
+    }
+});
+/**
+ * POST /api/users/register
+ * Register new user (with temp user migration support)
+ */
+/**
+ * POST /api/auth/register-with-invitation
+ * Register user from family invitation link
+ * Query params: invitation, email, token
+ */
+userRouter.get('/register-with-invitation', async (req, res) => {
+    try {
+        const { invitation: invitationId, email, token } = req.query;
+        // ✅ Validate query params
+        if (!invitationId || !email || !token) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invitation ID, email, and token are required in query params',
+                error: 'Missing required parameters',
+            });
+        }
+        // ✅ Verify one-time token
+        try {
+            const payload = await JWTService.verifyAccessToken(token);
+            if (payload.isUsed) {
+                return res.status(401).json({
+                    success: false,
+                    message: 'This invitation link has already been used or expired',
+                    error: 'Token already used',
+                });
+            }
+        }
+        catch (tokenError) {
+            return res.status(401).json({
+                success: false,
+                message: 'Invalid or expired invitation token',
+                error: 'Invalid token',
+            });
+        }
+        // ✅ Validate email format
+        const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+        if (!emailRegex.test(email)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Invalid email format',
+                error: 'Please provide a valid email address',
+            });
+        }
+        // ✅ Check if user already exists
+        const existingUser = await prisma.user.findUnique({
+            where: { email: email.trim() },
+        });
+        if (existingUser) {
+            return res.status(409).json({
+                success: false,
+                message: 'User with this email already exists',
+                error: 'Duplicate email',
+            });
+        }
+        // ✅ Fetch TempUser data
+        const tempUser = await prisma.tempUser.findUnique({
+            where: { email: email.trim() },
+        });
+        if (!tempUser) {
+            return res.status(404).json({
+                success: false,
+                message: 'No invitation found for this email',
+                error: 'No invitation found for this email',
+            });
+        }
+        // ✅ Verify invitation exists and is pending
+        const invitation = await prisma.familyInvitation.findUnique({
+            where: { id: invitationId },
+            include: { family: true },
+        });
+        if (!invitation) {
+            return res.status(404).json({
+                success: false,
+                message: 'Invitation not found',
+                error: 'Invalid invitation ID',
+            });
+        }
+        if (invitation.status !== 'pending') {
+            return res.status(400).json({
+                success: false,
+                message: `This invitation has already been ${invitation.status}`,
+                error: 'Invitation not pending',
+            });
+        }
+        // ✅ Check if invitation expired
+        if (invitation.expires_at && invitation.expires_at < new Date()) {
+            await prisma.familyInvitation.update({
+                where: { id: invitationId },
+                data: { status: 'expired' },
+            });
+            return res.status(400).json({
+                success: false,
+                message: 'This invitation has expired',
+                error: 'Invitation expired',
+            });
+        }
+        // ✅ Create new user with temp user data
+        const newUser = await prisma.user.create({
+            data: {
+                email: email.trim(),
+                name: tempUser.name || null,
+                phone: tempUser.phone || null,
+                password: null, // Hash this in production: await bcrypt.hash(password, 10)
+                user_type: 'parent',
+                is_active: true,
+                is_verified: false,
+            },
+        });
+        console.log(`✅ Created user from invitation: ${newUser.email}`);
+        // ✅ Create family membership with role as STRING (based on your current schema)
+        const familyMember = await prisma.familyMember.create({
+            data: {
+                family_id: tempUser.invited_by_family_id,
+                user_id: newUser.id,
+                role: tempUser.invited_role, // ⚠️ Using String role (your current schema)
+                joined_at: new Date(),
+                is_active: true,
+                // Set permissions based on role
+                can_invite: tempUser.invited_role === 'admin',
+                can_view: true,
+                can_edit: tempUser.invited_role === 'admin' || tempUser.invited_role === 'member',
+                can_delete: tempUser.invited_role === 'admin',
+            },
+        });
+        // ✅ Update invitation status
+        await prisma.familyInvitation.update({
+            where: { id: invitationId },
+            data: {
+                status: 'accepted',
+                invited_user_id: newUser.id,
+                accepted_at: new Date(),
+            },
+        });
+        // ✅ Delete temp user
+        await prisma.tempUser.delete({
+            where: { email: email.trim() },
+        });
+        console.log(`✅ User ${newUser.email} added to family ${invitation.family.name} as ${tempUser.invited_role}`);
+        return res.status(201).json({
+            success: true,
+            message: `Welcome! You've been added to ${invitation.family.name}`,
+            family: {
+                name: invitation.family.name,
+                role: tempUser.invited_role,
+            },
+        });
+    }
+    catch (error) {
+        console.error('❌ Error in invitation registration:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Failed to complete registration',
+            error: error instanceof Error ? error.message : 'Unknown error',
+        });
     }
 });
 /**

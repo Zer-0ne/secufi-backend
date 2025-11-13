@@ -1,9 +1,9 @@
 // middlewares/auth.middleware.ts
-import JWTService from '@/services/jwt.service';
-import { UserService } from '@/services/user.service';
-import { GoogleService } from '@/services/google.service';
-import { prisma } from '@/routes/user.routes';
-import { EncryptionService } from '@/services/encryption.service';
+import JWTService from '../services/jwt.service.js';
+import { UserService } from '../services/user.service.js';
+import { GoogleService } from '../services/google.service.js';
+import { prisma } from '../routes/user.routes.js';
+import { EncryptionService } from '../services/encryption.service.js';
 const encryptionService = new EncryptionService();
 const userService = new UserService(prisma);
 const googleService = new GoogleService({
@@ -24,7 +24,12 @@ export async function authenticateJWT(req, res, next) {
         const user = await userService.getUserByAccessToken(req, res);
         const { id } = user;
         await googleService.setUserId(id);
+        const familyId = await await prisma.family.findUnique({
+            where: { owner_id: id },
+            select: { id: true },
+        });
         req.user = payload;
+        req.params.familyId = familyId?.id;
         return next();
     }
     catch (error) {

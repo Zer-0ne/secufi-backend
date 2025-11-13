@@ -7,6 +7,7 @@ import { GmailAttachmentService } from '@services/gmail-attachment.service';
 import { EncryptionService } from '@services/encryption.service';
 import { convertBigIntToString } from '@/config/utils';
 import { AuthenticatedRequest, authenticateJWT } from '@/middlewares/auth.middleware';
+import { EmailMessage } from '@/types/google';
 
 const router = Router();
 const prisma = new PrismaClient();
@@ -104,7 +105,7 @@ router.post('/analyze', authenticateJWT, async (req: AuthenticatedRequest, res: 
         const emails = emailsResult.emails;
 
         console.log(`📧 Fetched ${emails.length} emails from Gmail`);
-        const financialEmailIds = await aiService.classifyEmailSubjects(emails);
+        const financialEmailIds = await aiService.classifyEmailSubjects(emails as EmailMessage[]);
         console.log(`${financialEmailIds.length} Financial email found`)
 
         const filteredEmails = emails.filter(email => financialEmailIds.includes(email.id));
