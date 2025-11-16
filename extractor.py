@@ -1,9 +1,9 @@
 """
-🔓 Universal Document Text Extraction System
+🔓 Enhanced Universal Document Text Extraction System with Table Support
 Supports: PDF (including password-protected), Scanned PDF, Images, DOCX, CSV, Excel, and more
 
 Author: AI Assistant
-Version: 2.0 with Password Protection
+Version: 3.0 with Enhanced Table Extraction
 """
 
 import os
@@ -13,9 +13,9 @@ from pathlib import Path
 from typing import Optional, Dict, List
 import mimetypes
 import io
+import re
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
-
 
 # PDF Extraction
 try:
@@ -24,13 +24,24 @@ try:
 except ImportError:
     PYMUPDF_AVAILABLE = False
 
-
 try:
     from pypdf import PdfReader
     PYPDF_AVAILABLE = True
 except ImportError:
     PYPDF_AVAILABLE = False
 
+# Enhanced table extraction
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    PDFPLUMBER_AVAILABLE = False
+
+try:
+    import tabula
+    TABULA_AVAILABLE = True
+except ImportError:
+    TABULA_AVAILABLE = False
 
 # OCR for scanned PDFs and images
 try:
@@ -41,14 +52,12 @@ try:
 except ImportError:
     OCR_AVAILABLE = False
 
-
 # DOCX extraction
 try:
     import docx
     DOCX_AVAILABLE = True
 except ImportError:
     DOCX_AVAILABLE = False
-
 
 # Excel extraction
 try:
@@ -58,14 +67,12 @@ try:
 except ImportError:
     EXCEL_AVAILABLE = False
 
-
 # CSV extraction
 import csv
 
 
-
 class DocumentExtractor:
-    """Universal document text extraction class with password support"""
+    """Universal document text extraction class with enhanced table support"""
     
     def __init__(self, file_path: str, password: Optional[str] = None):
         """
@@ -118,17 +125,54 @@ class DocumentExtractor:
     
     def _extract_pdf(self) -> Dict[str, any]:
         """
-        Extract text from PDF including password-protected and scanned PDFs
+        Extract text from PDF with enhanced table extraction
         
         Returns:
             Dict: Extraction result with text and metadata
         """
         text = ""
         method_used = None
+        has_tables = False
         
-        # Try PyMuPDF first (best for regular PDFs and password-protected)
-        if PYMUPDF_AVAILABLE:
+        # Try pdfplumber first for best table extraction
+        if PDFPLUMBER_AVAILABLE:
             try:
+                print("⟳ Using pdfplumber for table-aware extraction...")
+                
+                pdf_config = {'password': self.password} if self.password else {}
+                
+                with pdfplumber.open(str(self.file_path), **pdf_config) as pdf:
+                    for page_num, page in enumerate(pdf.pages, 1):
+                        print(f"  ⟳ Processing page {page_num}/{len(pdf.pages)}...")
+                        
+                        text += f"\n--- Page {page_num} ---\n"
+                        
+                        # Extract tables first
+                        tables = page.extract_tables()
+                        
+                        if tables:
+                            has_tables = True
+                            for table_num, table in enumerate(tables, 1):
+                                text += f"\n### Table {table_num} ###\n"
+                                text += self._format_table(table)
+                                text += "\n"
+                        
+                        # Extract remaining text (non-table text)
+                        page_text = page.extract_text()
+                        if page_text:
+                            text += page_text + "\n"
+                    
+                    method_used = "pdfplumber (table-aware)"
+                    print("✓ PDF extracted successfully with pdfplumber")
+                    
+            except Exception as e:
+                print(f"⚠ pdfplumber failed: {str(e)}")
+                text = ""
+        
+        # Fallback to PyMuPDF if pdfplumber not available or failed
+        if not text and PYMUPDF_AVAILABLE:
+            try:
+                print("⟳ Fallback to PyMuPDF...")
                 doc = fitz.open(str(self.file_path))
                 
                 # Check if PDF is encrypted
@@ -142,7 +186,6 @@ class DocumentExtractor:
                             'success': False
                         }
                     
-                    # Try to authenticate with password
                     auth_result = doc.authenticate(self.password)
                     if not auth_result:
                         return {
@@ -175,12 +218,33 @@ class DocumentExtractor:
                 print(f"⚠ PyMuPDF failed: {str(e)}")
                 text = ""
         
-        # Fallback to pypdf (also supports passwords)
+        # Try tabula for table extraction if other methods failed
+        if not text and TABULA_AVAILABLE:
+            try:
+                print("⟳ Using tabula for table extraction...")
+                tables = tabula.read_pdf(str(self.file_path), 
+                                        password=self.password,
+                                        pages='all', 
+                                        multiple_tables=True)
+                
+                text = ""
+                for i, df in enumerate(tables, 1):
+                    text += f"\n### Table {i} ###\n"
+                    text += df.to_string(index=False)
+                    text += "\n\n"
+                
+                method_used = "tabula-py"
+                has_tables = True
+                
+            except Exception as e:
+                print(f"⚠ tabula failed: {str(e)}")
+        
+        # Fallback to pypdf
         if not text and PYPDF_AVAILABLE:
             try:
+                print("⟳ Fallback to pypdf...")
                 reader = PdfReader(str(self.file_path))
                 
-                # Check if PDF is encrypted
                 if reader.is_encrypted:
                     print("⟳ PDF is encrypted/locked detected (pypdf)")
                     if not self.password:
@@ -191,7 +255,6 @@ class DocumentExtractor:
                             'success': False
                         }
                     
-                    # Try to unlock with password
                     decrypt_result = reader.decrypt(self.password)
                     if not decrypt_result:
                         return {
@@ -212,12 +275,6 @@ class DocumentExtractor:
                 
                 method_used = "pypdf"
                 
-                # Check if OCR needed
-                if len(text.strip()) < 100:
-                    print("⚠ Low text content detected, trying OCR...")
-                    text = self._extract_pdf_with_ocr()
-                    method_used = "pypdf + OCR"
-                    
             except Exception as e:
                 print(f"⚠ pypdf failed: {str(e)}")
         
@@ -237,8 +294,51 @@ class DocumentExtractor:
             'file_size': f"{self.file_path.stat().st_size / 1024:.2f}KB",
             'page_count': self._estimate_pages(text),
             'char_count': len(text),
+            'has_tables': has_tables,
             'success': len(text.strip()) > 0
         }
+    
+    def _format_table(self, table: List[List[str]]) -> str:
+        """
+        Format extracted table as markdown table
+        
+        Args:
+            table: List of rows, where each row is a list of cells
+            
+        Returns:
+            str: Formatted markdown table
+        """
+        if not table or len(table) == 0:
+            return ""
+        
+        # Clean cells
+        cleaned_table = []
+        for row in table:
+            cleaned_row = [str(cell).strip() if cell is not None else "" for cell in row]
+            cleaned_table.append(cleaned_row)
+        
+        # Find max column width
+        max_cols = max(len(row) for row in cleaned_table)
+        
+        # Pad rows to have same column count
+        for row in cleaned_table:
+            while len(row) < max_cols:
+                row.append("")
+        
+        # Format as markdown
+        formatted = ""
+        
+        # Header row
+        if cleaned_table:
+            header = cleaned_table[0]
+            formatted += "| " + " | ".join(header) + " |\n"
+            formatted += "| " + " | ".join(['---'] * len(header)) + " |\n"
+            
+            # Data rows
+            for row in cleaned_table[1:]:
+                formatted += "| " + " | ".join(row) + " |\n"
+        
+        return formatted
     
     def _extract_pdf_with_ocr(self) -> str:
         """
@@ -251,12 +351,7 @@ class DocumentExtractor:
             return "❌ OCR libraries not installed. Install: pip install pytesseract pdf2image pillow"
         
         try:
-            # Convert PDF pages to images
             kwargs = {'dpi': 300}
-            if self.password:
-                # For password-protected PDFs, we might need poppler
-                kwargs['poppler_path'] = None
-            
             images = convert_from_path(str(self.file_path), **kwargs)
             text = ""
             
@@ -290,7 +385,6 @@ class DocumentExtractor:
         try:
             image = Image.open(str(self.file_path))
             
-            # Enhance image for better OCR
             if image.mode != 'RGB':
                 image = image.convert('RGB')
             
@@ -331,14 +425,13 @@ class DocumentExtractor:
             }
         
         try:
-            # python-docx has limited password support
             try:
                 doc = docx.Document(str(self.file_path))
             except Exception as e:
                 error_msg = str(e).lower()
                 if "password" in error_msg or "encrypted" in error_msg:
                     return {
-                        'text': "❌ DOCX is password protected. python-docx has limited password support. Unlock with MS Word or LibreOffice first.",
+                        'text': "❌ DOCX is password protected. python-docx has limited password support.",
                         'method': 'Error',
                         'file_name': self.file_path.name,
                         'success': False
@@ -441,14 +534,13 @@ class DocumentExtractor:
             }
         
         try:
-            # Password-protected Excel handling
             try:
                 excel_file = pd.ExcelFile(str(self.file_path), engine='openpyxl')
             except Exception as e:
                 error_msg = str(e).lower()
                 if "password" in error_msg:
                     return {
-                        'text': "❌ Excel file is password protected. Unlock with Excel first or use: pip install openpyxl[security]",
+                        'text': "❌ Excel file is password protected.",
                         'method': 'Error',
                         'file_name': self.file_path.name,
                         'success': False
@@ -522,7 +614,6 @@ class DocumentExtractor:
             Dict: Extraction result 
         """
         try:
-            # Try reading as text
             with open(self.file_path, 'r', encoding='utf-8', errors='ignore') as f:
                 text = f.read()
             
@@ -557,7 +648,6 @@ class DocumentExtractor:
         return max(1, len(text) // chars_per_page)
 
 
-
 def extract_from_file(file_path: str, output_file: Optional[str] = None, 
                      password: Optional[str] = None) -> Dict[str, any]:
     """
@@ -586,7 +676,6 @@ def extract_from_file(file_path: str, output_file: Optional[str] = None,
         result['output_file'] = str(output_path)
     
     return result
-
 
 
 def batch_extract(directory: str, output_dir: str = "./extracted", 
@@ -647,25 +736,25 @@ def batch_extract(directory: str, output_dir: str = "./extracted",
     print(f"{'='*50}")
 
 
-
 def print_dependencies():
     """Print dependency check status"""
     print("\n" + "="*50)
     print("DEPENDENCY CHECK")
     print("="*50)
-    print(f"  PyMuPDF:    {'✓ Available' if PYMUPDF_AVAILABLE else '✗ Install: pip install PyMuPDF'}")
-    print(f"  pypdf:      {'✓ Available' if PYPDF_AVAILABLE else '✗ Install: pip install pypdf'}")
-    print(f"  OCR:        {'✓ Available' if OCR_AVAILABLE else '✗ Install: pip install pytesseract pdf2image pillow'}")
-    print(f"  DOCX:       {'✓ Available' if DOCX_AVAILABLE else '✗ Install: pip install python-docx'}")
-    print(f"  Excel:      {'✓ Available' if EXCEL_AVAILABLE else '✗ Install: pip install openpyxl pandas'}")
+    print(f"  PyMuPDF:     {'✓ Available' if PYMUPDF_AVAILABLE else '✗ Install: pip install PyMuPDF'}")
+    print(f"  pypdf:       {'✓ Available' if PYPDF_AVAILABLE else '✗ Install: pip install pypdf'}")
+    print(f"  pdfplumber:  {'✓ Available' if PDFPLUMBER_AVAILABLE else '✗ Install: pip install pdfplumber'}")
+    print(f"  tabula:      {'✓ Available' if TABULA_AVAILABLE else '✗ Install: pip install tabula-py'}")
+    print(f"  OCR:         {'✓ Available' if OCR_AVAILABLE else '✗ Install: pip install pytesseract pdf2image pillow'}")
+    print(f"  DOCX:        {'✓ Available' if DOCX_AVAILABLE else '✗ Install: pip install python-docx'}")
+    print(f"  Excel:       {'✓ Available' if EXCEL_AVAILABLE else '✗ Install: pip install openpyxl pandas'}")
     print("="*50 + "\n")
-
 
 
 def main():
     """CLI interface with password support"""
     parser = argparse.ArgumentParser(
-        description="🔓 Universal Document Text Extractor (with Password Support)",
+        description="🔓 Universal Document Text Extractor (Enhanced with Table Support)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 ╔════════════════════════════════════════════════════════════╗
@@ -676,7 +765,7 @@ def main():
    python extractor.py document.pdf
 
 2. Save to file:
-   python extractor.py scanned.pdf -o output.txt
+   python extractor.py statement.pdf -o output.txt
 
 3. Password-protected PDF:
    python extractor.py locked.pdf --password "mypassword" -o unlocked.txt
@@ -684,25 +773,26 @@ def main():
 4. Short form with password:
    python extractor.py locked.pdf -p "pass123" -o output.txt
 
-5. Extract image:
-   python extractor.py image.jpg -o extracted.txt
+5. Extract with tables (auto-detected):
+   python extractor.py bank_statement.pdf -o statement.txt
 
 6. Batch processing:
    python extractor.py --batch ./documents --output-dir ./extracted
 
 7. Batch with password:
-   python extractor.py --batch ./documents --password "yourpass" --output-dir ./extracted
+   python extractor.py --batch ./documents --password "yourpass"
 
 8. Show dependencies:
    python extractor.py --check
 
-9. Check if the document is password protected
-    python extractor.py document.pdf --check-protected
+9. Check if document is password protected:
+   python extractor.py document.pdf --check-protected
         """
     )
     
     parser.add_argument('file', nargs='?', help='File to extract text from')
-    parser.add_argument('--check-protected', action='store_true', help='Check if the document is password protected')
+    parser.add_argument('--check-protected', action='store_true', 
+                       help='Check if the document is password protected')
     parser.add_argument('-o', '--output', help='Output file path')
     parser.add_argument('-p', '--password', help='Password for encrypted/protected documents')
     parser.add_argument('--batch', help='Process all files in directory')
@@ -736,19 +826,18 @@ def main():
                     protected = doc.is_encrypted
                     doc.close()
                 except Exception as e:
-                    print(f"Error checking PDF protection with PyMuPDF: {e}")
+                    print(f"Error checking PDF protection: {e}")
             elif PYPDF_AVAILABLE:
                 try:
                     from pypdf import PdfReader
                     reader = PdfReader(str(extractor.file_path))
                     protected = reader.is_encrypted
                 except Exception as e:
-                    print(f"Error checking PDF protection with pypdf: {e}")
-            print(f"{extractor.file_path.name} is {'protected' if protected else 'not protected'}")
+                    print(f"Error checking PDF protection: {e}")
+            print(f"{'✓ Protected' if protected else '✗ Not protected'}: {extractor.file_path.name}")
         else:
-            print(f"Password protection check not supported for extension: {extractor.extension}")
+            print(f"⚠ Protection check not supported for: {extractor.extension}")
         return
-
     elif args.file:
         # Single file extraction
         result = extract_from_file(args.file, args.output, password=args.password)
@@ -763,6 +852,9 @@ def main():
             print(f"  Characters: {result['char_count']:,}")
             print(f"  Pages: {result.get('page_count', 'N/A')}")
             
+            if result.get('has_tables'):
+                print(f"  Tables: ✓ Detected and extracted")
+            
             if result.get('output_file'):
                 print(f"  Output: {result['output_file']}")
             
@@ -773,6 +865,7 @@ def main():
                 print("-"*50)
                 preview_text = result['text']
                 print(preview_text)
+
         else:
             print("✗ EXTRACTION FAILED")
             print("="*50)
@@ -782,7 +875,6 @@ def main():
         print("="*50 + "\n")
     else:
         parser.print_help()
-
 
 
 if __name__ == "__main__":

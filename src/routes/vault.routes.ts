@@ -6,10 +6,13 @@
 import { AuthenticatedRequest, authenticateJWT } from "@/middlewares/auth.middleware";
 import { AIService } from "@/services/ai.service";
 import { EncryptionService } from "@/services/encryption.service";
-import { FinancialDataService } from "@/services/financial-data.service";
+import { EmailData, FinancialDataService } from "@/services/financial-data.service";
 import { GmailAttachmentService } from "@/services/gmail-attachment.service";
-import { PrismaClient } from "@prisma/client";
+import { GoogleService } from "@/services/google.service";
+import { UserService } from "@/services/user.service";
+import { Asset, PrismaClient, User } from "@prisma/client";
 import { Router, Response } from "express";
+
 
 // ============================================================================
 // Service Initialization
@@ -36,6 +39,15 @@ const attachmentService = new GmailAttachmentService();
  * Handles asset operations and financial data processing
  */
 const financialDataService = new FinancialDataService(prisma, aiService);
+
+export const googleService = new GoogleService({
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    redirectUrl: process.env.GOOGLE_REDIRECT_URL ||
+        'http://localhost:5000/api/google/callback',
+}, prisma, encryptionService);
+
+const userService = new UserService(prisma);
 
 const vaultRoutes = Router();
 
@@ -271,12 +283,43 @@ vaultRoutes.put(
         try {
             const assetId = req.params.assetId;
             const assetData = req.body;
-            const updatedAsset = await financialDataService.updateAsset(
+            const assetToUpdate = await financialDataService.getAssetById(assetId, req.user?.userId!) as Asset
+
+            // start the email analysis again with required datas
+            let isRequiredDataExist = false;
+            console.log(assetToUpdate.required_fields)
+            for (const field of assetToUpdate?.required_fields || []) {
+                isRequiredDataExist = !!(await checkValueRequired(assetData, field as keyof Asset, req.user?.userId!))
+            }
+
+            if (isRequiredDataExist) {
+                const loaded = await googleService.loadCredentialsFromDatabase(req.user?.userId!);
+                if (!loaded) {
+                    return res.status(401).json({
+                        success: false,
+                        message: 'Not authenticated. Please connect Google account first.',
+                    });
+                }
+                const emailData = await googleService.getEmailById(assetToUpdate.email_id!)
+                const lockedAttachmentsPassword = await aiService.guessPassword(emailData?.subject!, emailData?.body!, req.user?.userId!, assetToUpdate)
+                console.log('password :: ', lockedAttachmentsPassword)
+                const emailWithAttachments = await googleService.getEmailWithAttachments(emailData?.id!, attachmentService, lockedAttachmentsPassword ? lockedAttachmentsPassword : undefined);
+                await financialDataService.updateFinancialEmail(req.user?.userId!, assetId, {
+                    emailId: emailData?.id!,
+                    subject: emailData?.subject!,
+                    from: emailData?.from!,
+                    body: emailData?.body!,
+                    date: emailData?.date!,
+                    attachmentContents: emailWithAttachments.attachments,
+                });
+            }
+
+            await financialDataService.updateAsset(
                 assetId,
                 req.user?.userId!,
                 assetData
             );
-            return res.status(200).json({ success: true, data: updatedAsset });
+            return res.status(200).json({ success: true, });
         } catch (error) {
             console.error('Error updating asset:', error);
             return res.status(500).json({
@@ -287,6 +330,19 @@ vaultRoutes.put(
         }
     }
 );
+
+
+const checkValueRequired = async (assetData: Asset, requiredField: keyof Asset | keyof User, userId: string) => {
+    const user = await prisma.user.findUnique({
+        where: {
+            id: userId
+        }
+    })
+    if (assetData[requiredField as keyof Asset] || user?.[requiredField as keyof User]) {
+        return true;
+    }
+    return false;
+}
 
 
 

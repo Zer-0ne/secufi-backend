@@ -1,4 +1,4 @@
-import { Asset, PrismaClient } from '@prisma/client';
+import { Asset, Prisma, PrismaClient } from '@prisma/client';
 import { AIService } from './ai.service';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -134,8 +134,8 @@ export class FinancialDataService {
         policy_number: true,
         fund_name: true,
         folio_number: true,
-        required_fields:true,
-        crn_number:true,
+        required_fields: true,
+        crn_number: true,
 
         // ✅ References
         transaction_id: true,
@@ -225,7 +225,8 @@ export class FinancialDataService {
 
         // ✅ Issues
         issues: true,
-        crn_number:true,
+        crn_number: true,
+        required_fields: true,
 
         // ✅ Timestamps
         created_at: true,
@@ -321,7 +322,7 @@ export class FinancialDataService {
         // ✅ Timestamps
         created_at: true,
         updated_at: true,
-        crn_number:true,
+        crn_number: true,
 
         // ❌ EXCLUDED - Document/Attachment Fields
         document_type: false,
@@ -438,7 +439,7 @@ export class FinancialDataService {
         policy_number: true,
         fund_name: true,
         folio_number: true,
-        crn_number:true,
+        crn_number: true,
 
         // ✅ References
         transaction_id: true,
@@ -557,8 +558,9 @@ export class FinancialDataService {
             documentType: this.guessDocumentType(attachment.filename),
           });
 
+
           const extracted = emailAnalysis.extractedData;
-          console.log('extracted data :: ',emailAnalysis.extractedData)
+          console.log('extracted data :: ', emailAnalysis.extractedData)
 
           // console.log(`Extracted Data :: ${JSON.stringify(extracted)}`)
 
@@ -728,6 +730,396 @@ export class FinancialDataService {
       };
     }
   }
+
+  /**
+ * Updates an existing financial asset record with new data from email
+ * 
+ * @param {string} userId - The ID of the user who owns the asset
+ * @param {string} assetId - The ID of the asset to update
+ * @param {EmailData} emailData - Email data containing updated financial information
+ * @returns {Promise<any>} Processing result with updated asset information
+ * 
+ * @description
+ * This method updates an existing financial asset record based on new email data.
+ * It follows the same processing flow as creation but updates existing records.
+ * 
+ * Features:
+ * - Updates existing asset records with new financial data
+ * - Preserves historical data in metadata
+ * - Updates transaction relationships
+ * - Handles attachment analysis for updated documents
+ * - Maintains audit trail of changes
+ * 
+ * @example
+ * ```
+ * const result = await updateFinancialEmail(
+ *   'user-123',
+ *   'asset-456',
+ *   {
+ *     subject: 'Updated Bank Statement',
+ *     body: 'Your updated account balance...',
+ *     from: 'bank@example.com',
+ *     attachmentContents: [...]
+ *   }
+ * );
+ * ```
+ */
+  /**
+   * Updates an existing financial asset record with new data from email
+   * 
+   * @param {string} userId - The UUID of the user who owns the asset
+   * @param {string} assetId - The UUID of the asset to update
+   * @param {EmailData} emailData - Email data containing updated financial information
+   * @returns {Promise<any>} Processing result with updated asset information
+   * 
+   * @description
+   * Updates existing asset records with new financial data from emails.
+   * Handles Decimal types for financial values and maintains proper relationships.
+   * 
+   * @example
+   * ```
+   * const result = await updateFinancialEmail(
+   *   'user-uuid-123',
+   *   'asset-uuid-456',
+   *   emailData
+   * );
+   * ```
+   */
+  async updateFinancialEmail(
+    userId: string,
+    assetId: string,
+    emailData: EmailData
+  ): Promise<any> {
+    try {
+      console.log(`⟳ Updating financial asset: ${assetId} from email: ${emailData.subject}`);
+
+      // Check if asset exists
+      const existingAsset = await this.prisma.asset.findUnique({
+        where: { id: assetId },
+      });
+
+      if (!existingAsset) {
+        throw new Error(`Asset with ID ${assetId} not found`);
+      }
+
+      if (existingAsset.user_id !== userId) {
+        throw new Error('Unauthorized: Asset does not belong to this user');
+      }
+
+      // Classify email content
+      const classification = await this.aiService.classifyEmailContent(emailData.body);
+
+      if (!classification.isFinancial) {
+        return {
+          updated: false,
+          reason: 'Not a financial email',
+        };
+      }
+
+      // Enhanced AI analysis
+      const emailAnalysis = await this.aiService.analyzeFinancialEmail(
+        {
+          emailContent: emailData.body,
+          subject: emailData.subject,
+          sender: emailData.from,
+          attachmentContents: emailData.attachmentContents,
+          documentType: this.guessDocumentType(emailData.subject),
+        },
+        userId
+      );
+
+      console.log('📊 Email Analysis:', emailAnalysis);
+
+      if (emailAnalysis.extractedData.confidence < 40) {
+        console.log(`⚠️ Low confidence: ${emailAnalysis.extractedData.confidence}%`);
+      }
+
+      let attachmentAnalyses: any[] = [];
+      const updatedAssetIds: string[] = [];
+      console.log(JSON.stringify(emailData))
+
+      // Process attachments
+      if (emailData.attachmentContents && emailData.attachmentContents.length > 0) {
+        for (const attachment of emailData.attachmentContents) {
+          console.log('attachment.content :: ', attachment.content)
+          const attachmentAnalysis = await this.aiService.analyzePDFDocument({
+            text: attachment.content,
+            documentType: this.guessDocumentType(attachment.filename),
+          });
+
+          const extracted = emailAnalysis.extractedData;
+          // console.log('attachmentAnalysis :: ', attachmentAnalysis)
+          // console.log('extracted data :: ', emailAnalysis.extractedData);
+          // console.log('extracted data :: ', JSON.stringify(emailAnalysis.extracted_content));
+
+          // Preserve previous metadata for audit trail
+          const previousMetadata = existingAsset.document_metadata as any;
+          const updateHistory = previousMetadata?.updateHistory || [];
+          updateHistory.push({
+            updatedAt: new Date().toISOString(),
+            previousBalance: existingAsset.balance?.toString(),
+            previousTotalValue: existingAsset.total_value?.toString(),
+            previousStatus: existingAsset.status,
+            emailId: emailData.emailId,
+            emailSubject: emailData.subject,
+          });
+
+          // Convert amounts to Decimal for Prisma
+          const balanceValue = extracted.amount
+            ? new Prisma.Decimal(String(extracted.amount))
+            : extracted.financialMetadata?.currentValue
+              ? new Prisma.Decimal(String(extracted.financialMetadata.currentValue))
+              : emailAnalysis.extractedData.amount
+                ? new Prisma.Decimal(String(emailAnalysis.extractedData.amount))
+                : existingAsset.balance;
+
+          const totalValue = extracted.financialMetadata?.totalValue
+            ? new Prisma.Decimal(String(extracted.financialMetadata.totalValue))
+            : emailAnalysis.extractedData.amount
+              ? new Prisma.Decimal(String(emailAnalysis.extractedData.amount))
+              : existingAsset.total_value;
+
+          // Update Asset with new data
+          const updatedAsset = await this.prisma.asset.update({
+            where: { id: assetId },
+            data: {
+              name: `${extracted.assetCategory?.toUpperCase()}: ${extracted.merchant || attachment.filename}`,
+
+              // 🎯 3-Category Classification
+              type: extracted.assetCategory || existingAsset.type,
+              sub_type: extracted.assetType || existingAsset.sub_type,
+
+              // 🏦 Bank Details (update only if new data available)
+              account_number: extracted.accountNumber || existingAsset.account_number,
+              ifsc_code: extracted.ifscCode || existingAsset.ifsc_code,
+              branch_name: extracted.branchName || existingAsset.branch_name,
+              bank_name: extracted.bankName || existingAsset.bank_name,
+
+              // 💰 Financial Values (Decimal type)
+              balance: balanceValue,
+              total_value: totalValue,
+
+              // 📊 Status
+              status: extracted.status || existingAsset.status,
+              last_updated: new Date(),
+
+              // 💳 Insurance/Investment Fields
+              policy_number: extracted.policyNumber || existingAsset.policy_number,
+              folio_number: extracted.folioNumber || existingAsset.folio_number,
+              fund_name: extracted.fundName || existingAsset.fund_name,
+
+              // CRN Number
+              crn_number: existingAsset.crn_number,
+
+              // Address
+              address: existingAsset.address,
+
+              // 📄 Document Fields
+              document_type: extracted.assetType || existingAsset.document_type,
+              file_name: attachment.filename,
+              file_size: attachment.size,
+              mime_type: attachment.mimeType,
+              file_content: attachment.content,
+
+              // 📋 Complete Metadata with history
+              document_metadata: {
+                category: extracted.assetCategory,
+                type: extracted.assetType,
+                subType: extracted.assetSubType,
+                status: extracted.status,
+                aiAnalysis: extracted,
+                attachmentAnalysis: attachmentAnalysis.extracted_content,
+                confidence: extracted.confidence,
+                financialMetadata: extracted.financialMetadata,
+                merchant: extracted.merchant,
+                description: extracted.description,
+                transactionDate: extracted.date,
+                currency: extracted.currency,
+                emailId: emailData.emailId,
+                emailSubject: emailData.subject,
+                emailSender: emailData.from,
+                extractedAt: new Date().toISOString(),
+                updatedAt: new Date().toISOString(),
+                keyPoints: emailAnalysis.keyPoints,
+                updateHistory,
+                previousMetadata: previousMetadata?.aiAnalysis || null,
+              },
+
+              email_id: emailData.emailId,
+              issues: emailAnalysis.issues || [],
+              required_fields: emailAnalysis.required_fields || [],
+            },
+          });
+
+          updatedAssetIds.push(updatedAsset.id);
+
+          console.log(`✅ Updated: ${extracted.assetCategory} > ${extracted.assetType} [${extracted.status}]`);
+
+          attachmentAnalyses.push({
+            assetId: updatedAsset.id,
+            fileName: attachment.filename,
+            category: extracted.assetCategory,
+            type: extracted.assetType,
+            status: extracted.status,
+            confidence: extracted.confidence,
+            analysis: attachmentAnalysis,
+            previousBalance: existingAsset.balance?.toString(),
+            newBalance: updatedAsset.balance?.toString(),
+          });
+        }
+      }
+
+      // ============================================
+      // FIXED: Safe Date Parsing Helper Function
+      // ============================================
+      const parseTransactionDate = (dateValue: any): Date => {
+        // If no date provided, return current date
+        if (!dateValue) {
+          return new Date();
+        }
+
+        // If it's already a Date object, check if valid
+        if (dateValue instanceof Date) {
+          return isNaN(dateValue.getTime()) ? new Date() : dateValue;
+        }
+
+        // If it's a string, try to parse it
+        if (typeof dateValue === 'string') {
+          const parsedDate = new Date(dateValue);
+          return isNaN(parsedDate.getTime()) ? new Date() : parsedDate;
+        }
+
+        // If it's an object (like your error case), try to use email date
+        if (typeof dateValue === 'object' && dateValue !== null) {
+          // If object has emailContent/subject, it's malformed data
+          // Fall back to current date
+          return new Date();
+        }
+
+        // Default fallback
+        return new Date();
+      };
+
+      // Create or update transaction
+      let transaction;
+      const amountDecimal = emailAnalysis.extractedData.amount
+        ? new Prisma.Decimal(String(emailAnalysis.extractedData.amount))
+        : null;
+
+      // ============================================
+      // FIXED: Safe Transaction Date Parsing
+      // ============================================
+      const transactionDate = parseTransactionDate(emailAnalysis.extractedData.date);
+
+      console.log(`📅 Transaction date parsed: ${transactionDate.toISOString()}`);
+
+      if (existingAsset.transaction_id) {
+        // Update existing transaction
+        transaction = await this.prisma.transaction.update({
+          where: { id: existingAsset.transaction_id },
+          data: {
+            subject: emailData.subject,
+            sender: emailData.from,
+            amount: amountDecimal,
+            currency: emailAnalysis.extractedData.currency || 'INR',
+            transaction_type: emailAnalysis.extractedData.transactionType || 'other',
+            merchant: emailAnalysis.extractedData.merchant || 'Unknown',
+            description: emailAnalysis.extractedData.description
+              ? emailAnalysis.extractedData.description.substring(0, 500)
+              : undefined,
+            transaction_date: transactionDate, // ✅ Fixed: Now using safe parsed date
+            email_date: new Date(emailData.date),
+            status: 'processed',
+
+            raw_data: {
+              emailContent: emailData.body.substring(0, 500),
+              classification,
+              assetIds: updatedAssetIds,
+              updateType: 'email_update',
+            },
+
+            extracted_data: {
+              ...emailAnalysis.extractedData,
+              assetIds: updatedAssetIds,
+              attachmentSummary: attachmentAnalyses,
+              updateTimestamp: new Date().toISOString(),
+            },
+          },
+        });
+      } else {
+        // Create new transaction if doesn't exist
+        transaction = await this.prisma.transaction.create({
+          data: {
+            user_id: userId,
+            email_id: emailData.emailId!,
+            subject: emailData.subject!,
+            sender: emailData.from!,
+            recipient: 'User',
+            amount: amountDecimal,
+            currency: emailAnalysis.extractedData.currency || 'INR',
+            transaction_type: emailAnalysis.extractedData.transactionType || 'other',
+            merchant: emailAnalysis.extractedData.merchant || 'Unknown',
+            description: emailAnalysis.extractedData.description
+              ? emailAnalysis.extractedData.description.substring(0, 500)
+              : undefined,
+            transaction_date: transactionDate, // ✅ Fixed: Now using safe parsed date
+            email_date: new Date(emailData.date),
+            status: 'processed',
+
+            raw_data: {
+              emailContent: emailData.body.substring(0, 500),
+              classification,
+              assetIds: updatedAssetIds,
+            },
+
+            extracted_data: {
+              ...emailAnalysis.extractedData,
+              assetIds: updatedAssetIds,
+              attachmentSummary: attachmentAnalyses,
+            },
+          },
+        });
+
+        // Link transaction to asset
+        await this.prisma.asset.update({
+          where: { id: assetId },
+          data: { transaction_id: transaction.id },
+        });
+      }
+
+      console.log(`✅ Transaction ${existingAsset.transaction_id ? 'Updated' : 'Created'}: ${transaction.id}`);
+      console.log(`📁 Assets updated: ${updatedAssetIds.length}`);
+
+      return {
+        updated: true,
+        transactionId: transaction.id,
+        emailAnalysis: {
+          summary: emailAnalysis.summary,
+          keyPoints: emailAnalysis.keyPoints,
+          extractedData: emailAnalysis.extractedData,
+        },
+        attachmentAnalyses,
+        assetIds: updatedAssetIds,
+        changes: {
+          balanceChange: attachmentAnalyses[0]?.newBalance
+            ? new Prisma.Decimal(attachmentAnalyses[0].newBalance)
+              .sub(new Prisma.Decimal(attachmentAnalyses[0].previousBalance || 0))
+              .toString()
+            : '0',
+          statusChange: existingAsset.status !== emailAnalysis.extractedData.status,
+        },
+      };
+    } catch (error) {
+      console.error('❌ Error updating asset:', error);
+      return {
+        updated: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+
+
 
   /**
    * Get all financial data for a user with filters

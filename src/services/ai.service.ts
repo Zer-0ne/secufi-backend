@@ -1,6 +1,7 @@
 import { prisma } from "@/config/database";
 import { AttachmentContent, EmailData } from "./financial-data.service";
 import { EmailMessage } from "@/types/google";
+import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
 
 interface FinancialAnalysisRequest {
   emailContent: string;
@@ -16,7 +17,7 @@ interface EnhancedFinancialData {
   amount: number | null;
   currency: string;
   merchant: string;
-  balance:string;
+  balance: string;
   description: string;
   date: string;
   accountNumber: string | null;
@@ -138,12 +139,18 @@ interface AnalysisResult {
   summary: string;
   issues: string[];
   required_fields: string[];
-  attachmentAnalyses:any
+  attachmentAnalyses: any
+  extracted_content:any
 }
 
 
 export class AIService {
   private openaiKey: string;
+
+  // badrock
+  private bedrockApiKey: string;
+  private bedrockEndpoint: string;
+  private modelId: string;
 
   constructor(openaiKey?: string) {
     this.openaiKey = openaiKey || process.env.OPENAI_API_KEY || '';
@@ -153,7 +160,124 @@ export class AIService {
     } else {
       console.log('✓ OpenAI API key configured');
     }
+
+
+    // badrock 
+    this.bedrockApiKey = process.env.AWS_BEARER_TOKEN_BEDROCK || '';
+    const awsRegion = process.env.AWS_REGION || 'us-east-1';
+    this.bedrockEndpoint = `https://bedrock-runtime.${awsRegion}.amazonaws.com`;
+
+    // Choose your model
+    this.modelId = 'anthropic.claude-3-sonnet-20240229-v1:0';
+
+    if (!this.bedrockApiKey) {
+      throw new Error('AWS_BEARER_TOKEN_BEDROCK environment variable is required');
+    }
+
+    console.log('✓ AWS Bedrock configured with API key authentication');
+    console.log('✓ Model:', this.modelId);
   }
+
+  private async callBedrock(prompt: string, systemPrompt?: string): Promise<string> {
+    try {
+      console.log('⟳ Calling AWS Bedrock API...');
+
+      let body: any;
+
+      if (this.modelId.includes('claude')) {
+        // Claude model format (WITHOUT thinking parameter for REST API)
+        body = {
+          anthropic_version: "bedrock-2023-05-31",
+          max_tokens: 8000,
+          messages: [
+            {
+              role: "user",
+              content: prompt
+            }
+          ],
+          temperature: 0.3,
+          top_p: 0.95,
+        };
+
+        // Add system prompt if provided
+        if (systemPrompt) {
+          body.system = systemPrompt;
+        }
+
+      } else if (this.modelId.includes('titan')) {
+        // Amazon Titan format
+        body = {
+          inputText: prompt,
+          textGenerationConfig: {
+            maxTokenCount: 8000,
+            stopSequences: [],
+            temperature: 0.3,
+            topP: 0.95,
+          }
+        };
+      } else if (this.modelId.includes('llama')) {
+        // Meta Llama format
+        body = {
+          prompt: prompt,
+          max_gen_len: 8000,
+          temperature: 0.3,
+          top_p: 0.95,
+        };
+      }
+
+      // Make HTTP request with Bearer token
+      const url = `${this.bedrockEndpoint}/model/${this.modelId}/invoke`;
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'Authorization': `Bearer ${this.bedrockApiKey}`
+        },
+        body: JSON.stringify(body)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Bedrock API error: ${errorText}`);
+        throw new Error(`Bedrock API error (${response.status}): ${errorText}`);
+      }
+
+      const modelResponse = await response.json() as any;
+      console.log('✓ Bedrock response received');
+
+      // Extract text based on model type
+      if (this.modelId.includes('claude')) {
+        // Claude 3.5 Sonnet response structure
+        let fullResponse = '';
+
+        // Extract main content
+        if (modelResponse.content && Array.isArray(modelResponse.content)) {
+          for (const block of modelResponse.content) {
+            if (block.type === 'text') {
+              fullResponse += block.text;
+            }
+          }
+        }
+
+        return fullResponse || modelResponse.content[0]?.text || '';
+
+      } else if (this.modelId.includes('titan')) {
+        return modelResponse.results[0].outputText;
+
+      } else if (this.modelId.includes('llama')) {
+        return modelResponse.generation;
+      }
+
+      throw new Error('Unsupported model response format');
+
+    } catch (error) {
+      console.error('AWS Bedrock API failed:', error);
+      throw error;
+    }
+  }
+
 
   /**
  * Classify email subjects and return only financial email IDs
@@ -217,7 +341,7 @@ Return ONLY a JSON array with JUST the indices of MAJOR financial emails:
 
 Only return indices of emails with MAJOR financial data. Return empty array [] if none qualify.`;
 
-      const response = await this.callOpenAI(prompt);
+      const response = await this.callBedrock(prompt);
       const jsonMatch = response.match(/\[[\s\S]*?\]/);
 
       if (!jsonMatch) {
@@ -324,6 +448,7 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
 
     return false;
   }
+
 
   /**
    * Check if email is MAJOR financial only
@@ -586,14 +711,14 @@ CLASSIFICATION RULES:
 
 1. ASSET - Things owned with value:
    Sub-types:
-   - liquid_asset: Cash, savings, checking account, fixed deposits, money market funds
-   - investment: Stocks, bonds, mutual funds, ETF, SIP, PPF, NPS, 401k, retirement accounts
-   - real_estate: House, land, commercial property, rental property, real estate investment
-   - vehicle: Car, bike, commercial vehicle, automobile
-   - precious_metal: Gold, silver, platinum holdings, gold bonds
-   - business: Business ownership, partnership shares, equity stake
-   - digital_asset: Cryptocurrency, NFT, domain names, digital properties
-   - receivable: Money owed to you, loans given, security deposits refundable
+   - Cash, savings, checking account, fixed deposits, money market funds
+   - Stocks, bonds, mutual funds, ETF, SIP, PPF, NPS, 401k, retirement accounts
+   -  House, land, commercial property, rental property, real estate investment
+   -  Car, bike, commercial vehicle, automobile
+   - Gold, silver, platinum holdings, gold bonds
+   -  Business ownership, partnership shares, equity stake
+   -  Cryptocurrency, NFT, domain names, digital properties
+   - Money owed to you, loans given, security deposits refundable
 
 2. LIABILITY - Money owed to others:
    Sub-types:
@@ -835,7 +960,7 @@ IMPORTANT: In "requiredUserFields", identify which personal/account fields are R
 
 Now analyze the provided email and return structured JSON:`;
 
-      const response = await this.callOpenAI(prompt);
+      const response = await this.callBedrock(prompt);
       const jsonMatch = response.match(/\{[\s\S]*\}/);
 
       if (!jsonMatch) {
@@ -856,15 +981,17 @@ Now analyze the provided email and return structured JSON:`;
       }
 
       const extracted: EnhancedFinancialData = JSON.parse(jsonMatch[0]);
-      const issues = await this.validateExtractedData(extracted, data.attachmentContents);;
-      console.log('extracted.requiredUserFields :: ', extracted.requiredUserFields);
-
       const requiredFields = await this.checkMissingUserFields(
         userId,
         extracted.requiredUserFields || {}
       );
 
-      console.log('requiredFields :: ',requiredFields)
+
+      const issues = await this.validateExtractedData(extracted, data.attachmentContents!);
+      // console.log('extracted.requiredUserFields :: ', extracted.requiredUserFields);
+
+
+      // console.log('requiredFields :: ', requiredFields)
 
       if (issues.length > 0) {
         console.log('⚠️ Validation Issues Found:', issues);
@@ -915,6 +1042,7 @@ Now analyze the provided email and return structured JSON:`;
         attachmentAnalyses,
         issues,
         required_fields: requiredFields,
+        extracted_content:extracted
       };
     } catch (error) {
       console.error('Error analyzing financial email:', error);
@@ -1064,7 +1192,7 @@ Return ONLY a JSON array of detected issues:
 If NO issues found, return: {"issues": []}
 `;
 
-      const aiResponse = await this.callOpenAI(aiContentPrompt);
+      const aiResponse = await this.callBedrock(aiContentPrompt);
       const jsonMatch = aiResponse.match(/\{[\s\S]*\}/);
 
       if (jsonMatch) {
@@ -1088,9 +1216,25 @@ If NO issues found, return: {"issues": []}
    */
   private async validateExtractedData(
     extracted: EnhancedFinancialData,
+    requiredFields: Record<string, any>, // Added parameter
     attachmentContents?: Array<{ filename: string; mimeType: string; content: string; size: number }>
   ): Promise<string[]> {
     const issues: string[] = [];
+
+    // =====================================
+    // 0. REQUIRED FIELDS VALIDATION [web:68][web:74]
+    // =====================================
+    if (requiredFields && Object.keys(requiredFields).length > 0) {
+      for (const [fieldName, fieldValue] of Object.entries(requiredFields)) {
+        if (fieldValue === null || fieldValue === undefined || fieldValue === '') {
+          issues.push(`Missing required user field: ${fieldName}`);
+        } else if (typeof fieldValue === 'string' && fieldValue.trim() === '') {
+          issues.push(`Required user field '${fieldName}' is empty`);
+        } else if (Array.isArray(fieldValue) && fieldValue.length === 0) {
+          issues.push(`Required user field '${fieldName}' is an empty array`);
+        }
+      }
+    }
 
     // =====================================
     // 1. CONFIDENCE SCORE CHECK
@@ -1140,7 +1284,7 @@ If NO issues found, return: {"issues": []}
     }
 
     // =====================================
-    // 4. DATE VALIDATION [web:1]
+    // 4. DATE VALIDATION
     // =====================================
     if (extracted.date) {
       const extractedDate = new Date(extracted.date);
@@ -1164,7 +1308,7 @@ If NO issues found, return: {"issues": []}
     }
 
     // =====================================
-    // 5. BANK ACCOUNT VALIDATION [web:1]
+    // 5. BANK ACCOUNT VALIDATION
     // =====================================
     if (extracted.accountNumber) {
       const digitsOnly = extracted.accountNumber.replace(/[^0-9]/g, '');
@@ -1175,7 +1319,7 @@ If NO issues found, return: {"issues": []}
     }
 
     if (extracted.ifscCode) {
-      // IFSC format: 4 letters + 0 + 6 alphanumeric (e.g., SBIN0001234) [web:1]
+      // IFSC format: 4 letters + 0 + 6 alphanumeric (e.g., SBIN0001234)
       if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(extracted.ifscCode.toUpperCase())) {
         issues.push('Invalid IFSC code format (expected: XXXX0XXXXXX)');
       }
@@ -1234,7 +1378,7 @@ If NO issues found, return: {"issues": []}
     }
 
     if (extracted.assetCategory === 'insurance') {
-      // Insurance should have policy number [web:7]
+      // Insurance should have policy number
       if (!extracted.policyNumber) {
         issues.push('Insurance policy missing policy number');
       }
@@ -1337,7 +1481,7 @@ If NO issues found, return: {"issues": []}
     }
 
     // =====================================
-    // 10. METADATA COMPLETENESS CHECK [web:2][web:3]
+    // 10. METADATA COMPLETENESS CHECK
     // =====================================
     if (!extracted.description || extracted.description.length < 10) {
       issues.push('Insufficient transaction description (minimum 10 characters required)');
@@ -1373,62 +1517,14 @@ If NO issues found, return: {"issues": []}
     }
 
     // =====================================
-    // 13. DOCUMENT QUALITY CHECK [web:7]
+    // 13. DOCUMENT QUALITY CHECK
     // =====================================
     if (extracted.confidence < 50) {
       issues.push('Poor document quality - OCR extraction unreliable (confidence <50%)');
     }
 
     // =====================================
-    // 14. 🆕 FILE CONTENT ANALYSIS [web:11][web:16][web:19][web:28]
-    // =====================================
-    if (attachmentContents && attachmentContents.length > 0) {
-      for (const attachment of attachmentContents) {
-        console.log(`🔍 Analyzing file content: ${attachment.filename}`);
-
-        const fileContentIssues = await this.analyzeFileContentIssues(
-          attachment.content,
-          attachment.filename,
-          attachment.mimeType
-        );
-
-        if (fileContentIssues.length > 0) {
-          // Prefix with filename for clarity
-          fileContentIssues.forEach((issue) => {
-            issues.push(`[${attachment.filename}] ${issue}`);
-          });
-        }
-
-        // File size validation [web:28]
-        if (attachment.size === 0) {
-          issues.push(`[${attachment.filename}] File is empty (0 bytes)`);
-        } else if (attachment.size < 100) {
-          issues.push(`[${attachment.filename}] File size too small (${attachment.size} bytes) - possible corruption`);
-        } else if (attachment.size > 10 * 1024 * 1024) {
-          // 10MB
-          issues.push(`[${attachment.filename}] Large file size (${(attachment.size / 1024 / 1024).toFixed(2)} MB) - may impact processing`);
-        }
-
-        // MIME type validation
-        const validMimeTypes = [
-          'application/pdf',
-          'image/png',
-          'image/jpeg',
-          'image/jpg',
-          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-          'application/msword',
-          'text/csv',
-          'application/vnd.ms-excel',
-          'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        ];
-        if (!validMimeTypes.includes(attachment.mimeType)) {
-          issues.push(`[${attachment.filename}] Unsupported or unusual file type: ${attachment.mimeType}`);
-        }
-      }
-    }
-
-    // =====================================
-    // 15. CROSS-FIELD VALIDATION
+    // 14. CROSS-FIELD VALIDATION
     // =====================================
     // EMI vs Outstanding Balance check
     if (
@@ -1455,6 +1551,7 @@ If NO issues found, return: {"issues": []}
     // =====================================
     return [...new Set(issues)];
   }
+
 
 
 
@@ -1559,7 +1656,7 @@ If NO issues found, return: {"issues": []}
         currency,
         merchant,
         description: data.emailContent.substring(0, 100),
-        date:data as any,
+        date: data as any,
         confidence,
       } as any,
       keyPoints: [
@@ -1576,32 +1673,153 @@ If NO issues found, return: {"issues": []}
    */
   async analyzePDFDocument(data: PDFAnalysisRequest): Promise<AnalysisResult> {
     try {
-      const prompt = `Analyze this document and extract key financial information:
+      const systemPrompt = `You are an expert financial document analyzer specializing in:
+- Bank statements and transaction records
+- Insurance policies and claims
+- Investment portfolios and reports
+- Invoices, receipts, and bills
+- Tax documents and returns
+- Loan agreements and EMI schedules
+- Asset and liability documentation
 
-Document Type: ${data.documentType || 'Unknown'}
-Content: ${data.text}...
+Extract ALL relevant financial information with precision and structure.`;
 
-Please extract:
-1. Document type (invoice, receipt, statement, etc.)
-2. Key financial figures (amounts, totals)
-3. Parties involved (sender, receiver, merchant)
-4. Important dates
-5. Account/Reference numbers
-6. Any other critical financial information
-7. Data quality score (0-100)
+      const prompt = `Analyze this financial document comprehensively and extract ALL key information:
 
-Return JSON format:
-{
-  "documentType": "invoice|receipt|statement|tax|contract|other",
-  "keyFigures": [{"label": "string", "value": "string"}],
-  "parties": {"sender": "string", "receiver": "string"},
-  "dates": {"document": "YYYY-MM-DD", "due": "YYYY-MM-DD"},
-  "referenceNumbers": {"invoice": "string", "account": "string"},
-  "dataQuality": number,
-  "keyFindings": ["finding 1", "finding 2"]
-}`;
+═══════════════════════════════════════════════════════════
+DOCUMENT INFORMATION
+═══════════════════════════════════════════════════════════
+Document Type Hint: ${data.documentType || 'Unknown - Please identify'}
+Document Length: ${data.text.length} characters
 
-      const response = await this.callOpenAI(prompt);
+═══════════════════════════════════════════════════════════
+DOCUMENT CONTENT
+═══════════════════════════════════════════════════════════
+${data.text}
+
+═══════════════════════════════════════════════════════════
+EXTRACTION REQUIREMENTS
+═══════════════════════════════════════════════════════════
+
+Perform a COMPREHENSIVE analysis and extract:
+
+1. DOCUMENT CLASSIFICATION
+   - Identify exact document type
+   - Determine financial category
+   - Assess document purpose
+
+2. FINANCIAL FIGURES (Critical)
+   - Opening balance
+   - Closing balance
+   - Current balance
+   - Total amount
+   - Subtotal
+   - Tax amounts (GST, CGST, SGST, etc.)
+   - Discounts
+   - Fees and charges
+   - Interest amounts
+   - EMI amounts
+   - Premium amounts
+   - Sum assured/insured
+   - Investment value
+   - Returns/gains/losses
+   - ANY other monetary values
+
+3. PARTIES & ENTITIES
+   - Sender/Issuer name
+   - Receiver/Customer name
+   - Bank/Institution name
+   - Branch name
+   - Merchant name
+   - Service provider
+   - Beneficiary details
+   - Nominee information
+
+4. IDENTIFICATION NUMBERS
+   - Account number
+   - IFSC code
+   - CRN (Customer Reference Number)
+   - Policy number
+   - Folio number
+   - Invoice number
+   - Receipt number
+   - Transaction ID/Reference
+   - PAN number
+   - GST number
+   - Customer ID
+
+5. DATES (All formats: DD/MM/YYYY, YYYY-MM-DD, etc.)
+   - Document date
+   - Statement period (from - to)
+   - Transaction dates
+   - Due date
+   - Payment date
+   - Maturity date
+   - Expiry date
+   - Issue date
+
+6. TRANSACTION DETAILS (if applicable)
+   - List of transactions
+   - Credit entries
+   - Debit entries
+   - Transaction descriptions
+   - Payment methods
+   - Categories
+
+7. CONTACT & ADDRESS
+   - Full address
+   - Email address
+   - Phone numbers
+   - Website
+
+8. ADDITIONAL METADATA
+   - Currency (INR, USD, etc.)
+   - Statement frequency
+   - Account type
+   - Product type
+   - Plan name
+   - Coverage details
+   - Terms and conditions
+   - Important notes/warnings
+
+9. DATA QUALITY ASSESSMENT
+   - Text clarity (0-100)
+   - Completeness (0-100)
+   - Structure quality (0-100)
+   - Overall confidence (0-100)
+
+10. ACCOUNG HOLDER DETAILS 
+    - ADDRESS
+    - PHONE NUMBER
+    - BANK ADDRESS
+    - OTHER DETAILS
+
+═══════════════════════════════════════════════════════════
+RESPONSE FORMAT (STRICT JSON)
+═══════════════════════════════════════════════════════════
+
+Return ONLY valid JSON 
+═══════════════════════════════════════════════════════════
+IMPORTANT INSTRUCTIONS
+═══════════════════════════════════════════════════════════
+
+1. Extract ALL numbers - don't miss any financial figures
+2. Use null for missing/not applicable fields
+3. Convert all dates to YYYY-MM-DD format
+4. Remove currency symbols from numbers (₹, $, etc.)
+5. Include decimal places for amounts (e.g., 1234.56)
+6. List transactions in chronological order
+7. Be thorough with identification numbers
+8. Assess quality honestly based on text clarity
+9. Provide specific, actionable key findings
+10. Return ONLY the JSON object, no additional text
+11. full account number
+
+Begin analysis now:`;
+
+      // console.log(prompt)
+
+      const response = await this.callBedrock(prompt, systemPrompt);
       const jsonMatch = response.match(/\{[\s\S]*\}/);
 
       if (!jsonMatch) {
@@ -1609,20 +1827,69 @@ Return JSON format:
       }
 
       const extracted = JSON.parse(jsonMatch[0]);
+      console.log(extracted)
 
       return {
         success: true,
         extractedData: {
+          content: extracted,
           transactionType: extracted.documentType || 'other',
           confidence: extracted.dataQuality || 50,
         } as any,
         keyPoints: extracted.keyFindings,
-        summary: `${extracted.documentType} with ${extracted.keyFigures.length} financial figures identified`,
+        summary: `${extracted?.documentType} with ${extracted?.keyFigures?.length} financial figures identified`,
       } as any;
     } catch (error) {
       console.error('Error analyzing PDF document:', error);
       return this.fallbackPDFAnalysis(data);
     }
+  }
+
+  structureData = async (data: string) => {
+    try {
+      const prompt = `structure this data :: ${data}`
+      return await this.callBedrock(prompt)
+    } catch (error) {
+      console.log('Error in structuring the data :: ', (error as Error).message)
+      return
+    }
+  }
+
+  private formatAdditionalDetails(details: object): string[] {
+    const formatted: string[] = [];
+
+    for (const [key, value] of Object.entries(details)) {
+      if (value !== null && value !== undefined && value !== '') {
+        // Format the key (convert snake_case/camelCase to readable format)
+        const formattedKey = key
+          .replace(/_/g, ' ')
+          .replace(/([A-Z])/g, ' $1')
+          .split(' ')
+          .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+          .join(' ')
+          .trim();
+
+        // Handle different value types
+        if (typeof value === 'object' && value !== null) {
+          if (value instanceof Date) {
+            const date = new Date(value);
+            const formattedDate = `${String(date.getDate()).padStart(2, '0')}/${String(date.getMonth() + 1).padStart(2, '0')}/${date.getFullYear()}`;
+            formatted.push(`${formattedKey}: ${formattedDate}`);
+          } else if (Array.isArray(value)) {
+            formatted.push(`${formattedKey}: ${value.join(', ')}`);
+          } else {
+            // Nested object - flatten it
+            formatted.push(`${formattedKey}:`);
+            const nested = this.formatAdditionalDetails(value);
+            formatted.push(...nested.map(line => `  ${line}`));
+          }
+        } else {
+          formatted.push(`${formattedKey}: ${value}`);
+        }
+      }
+    }
+
+    return formatted;
   }
 
   /**
@@ -1631,7 +1898,8 @@ Return JSON format:
   guessPassword = async (
     subject: string,
     body: string,
-    userId: string
+    userId: string,
+    additionalDetails?: object
   ) => {
     try {
       // Fetch user details from database
@@ -1677,10 +1945,22 @@ Return JSON format:
         userInfo = `\n\nUser Details:\n${details.join('\n')}`;
       }
 
+      if (additionalDetails && Object.keys(additionalDetails).length > 0) {
+        const additionalInfo = this.formatAdditionalDetails(additionalDetails);
+        if (additionalInfo.length > 0) {
+          details.push(''); // Empty line for separation
+          details.push('Additional Information:');
+          details.push(...additionalInfo);
+        }
+      }
+
+      // console.log('details :: ',details)
+
       const prompt = `Read the email and identify password instructions for the attachment. If instructions are found and user details are provided, generate the password according to those instructions.
 
 Email Subject: ${subject}
 Email Body: ${body}${userInfo}
+Additional Details: ${details}
 
 Instructions:
 1. Look for password instructions in the email for password-protected attachments
@@ -1690,8 +1970,8 @@ Instructions:
 
 Response (just password or "false"):`;
 
-      console.log(prompt)
-      const response = await this.callOpenAI(prompt);
+      // console.log(prompt)
+      const response = await this.callBedrock(prompt);
       const password = response.trim();
 
       // console.log(response,password)

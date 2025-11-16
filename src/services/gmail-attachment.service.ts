@@ -870,7 +870,7 @@ Processing status: Ready for OCR analysis`;
 
         // Spawn Python process with 30-second timeout
         const python = spawn('python3', args, {
-          timeout: 30000,
+          timeout: 300000,
           stdio: ['pipe', 'pipe', 'pipe'],
         });
 
@@ -969,7 +969,7 @@ Processing status: Ready for OCR analysis`;
               error: 'Processing timeout (30s)',
             },
           });
-        }, 30000);
+        }, 300000);
       } catch (error) {
         console.error('Error spawning Python:', error);
         resolve({

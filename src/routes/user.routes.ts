@@ -162,10 +162,13 @@ userRouter.put('/kyc', authenticateJWT, async (req: AuthenticatedRequest, res: R
     }
 
     let senetize_dob = ''
+    // console.log(date_of_birth)
 
     if ((date_of_birth as string).split('/')[0].length <= 2) {
-      senetize_dob = (date_of_birth as string).split('/').reverse().join()
+      senetize_dob = (date_of_birth as string).split('/').reverse().join('-')
     }
+
+    // console.log('senetize_dob :: ',senetize_dob)
 
     // console.log(date_of_birth.toISOString().split("T")[0])
 
@@ -173,7 +176,7 @@ userRouter.put('/kyc', authenticateJWT, async (req: AuthenticatedRequest, res: R
       phone,
       address,
       name,
-      date_of_birth: new Date(senetize_dob),
+      date_of_birth: new Date(senetize_dob || date_of_birth),
       is_verified: true,
       pan_number,
     } as any);

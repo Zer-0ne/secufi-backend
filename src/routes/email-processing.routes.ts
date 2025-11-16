@@ -58,9 +58,17 @@ router.post('/analyze', authenticateJWT, async (req: AuthenticatedRequest, res: 
         // ✅ 1️⃣ Fetch user and expiry field
         const user = await prisma.user.findUnique({
             where: { id: userId },
-            select: { expire_email_processing: true },
+            select: { expire_email_processing: true, is_verified: true },
         });
 
+        if (!user?.is_verified) {
+            res.status(401).json({
+                success: false,
+                message: 'Please complete your KYC to continue.',
+                error: 'KYC verification is pending.'
+            });
+        }
+        
         if (!user) {
             res.status(404).json({
                 success: false,
