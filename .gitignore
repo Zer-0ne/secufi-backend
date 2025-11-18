@@ -6,6 +6,5 @@ node_modules
 
 uploads/
 tmp/
-dist/
 /src/generated/prisma
 /src/generated/prisma

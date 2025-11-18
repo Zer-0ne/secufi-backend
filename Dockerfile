@@ -1,41 +1,24 @@
-# Production Dockerfile
-FROM node:22-alpine
+# Production Dockerfile - DEBIAN-BASED (WORKS!)
+FROM node:22-slim
 
-# Install build dependencies (temporarily) and runtime dependencies
-RUN apk add --no-cache \
-    # Runtime dependencies (permanent)
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y \
     python3 \
-    py3-pip \
+    python3-pip \
+    python3-venv \
     tesseract-ocr \
-    tesseract-ocr-data-eng \
     poppler-utils \
-    mupdf-dev \
-    freetype-dev \
-    jbig2dec-dev \
-    jpeg-dev \
-    openjpeg-dev \
-    harfbuzz-dev \
-    && ln -sf python3 /usr/bin/python
-
-# Add virtual build dependencies (will be removed later)
-RUN apk add --no-cache --virtual .build-deps \
-    gcc \
-    g++ \
-    make \
-    musl-dev \
-    python3-dev \
-    clang-dev \
-    linux-headers
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install ONLY production dependencies (no devDependencies)
+# Install ONLY production Node.js dependencies
 RUN npm ci --only=production
 
-# Install Python packages with build dependencies present
+# Install Python packages (uses pre-built wheels - FAST!)
 RUN pip3 install --no-cache-dir --break-system-packages \
     PyMuPDF \
     pypdf \
@@ -48,24 +31,21 @@ RUN pip3 install --no-cache-dir --break-system-packages \
     openpyxl \
     pandas
 
-# Remove build dependencies to save space (~200MB saved)
-RUN apk del .build-deps
-
-# Copy pre-built dist folder from your local machine
+# Copy pre-built dist folder
 COPY dist ./dist
 
 # Copy Prisma files
 COPY prisma ./prisma
 
-# Generate Prisma client (lightweight operation)
+# Generate Prisma client
 RUN npx prisma generate
 
 # Copy Python script
 COPY extractor.py ./
 
 # Create non-root user
-RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001 && \
+RUN groupadd -g 1001 nodejs && \
+    useradd -u 1001 -g nodejs nodejs && \
     chown -R nodejs:nodejs /app
 
 USER nodejs

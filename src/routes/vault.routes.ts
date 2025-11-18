@@ -118,15 +118,18 @@ vaultRoutes.post(
     async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
         try {
             const assetData = req.body;
+            console.log(req.user?.userId)
+            // const assetTypes = await prisma.asset.groupBy({
+            //     by: ['type'],
+            //     where: {
+            //         user_id: req.user?.userId!
+            //     }
+            // });
 
-            const assetTypes = await prisma.asset.groupBy({
-                by: ['type'],
-                where: {
-                    user_id: req.user?.userId!
-                }
-            });
+            // const allowedTypes = assetTypes.map(item => item.type) || ['asset', 'liability', 'insurance'];
 
-            const allowedTypes = assetTypes.map(item => item.type);
+            // console.log(assetTypes)
+
 
             // Validate required fields
             if (!assetData.name || !assetData.type || !assetData.sub_type) {
@@ -137,14 +140,32 @@ vaultRoutes.post(
             }
 
             // Validate asset type
-            // const allowedTypes = ['asset', 'liability', 'insurance'];
-            if (!allowedTypes.includes(assetData.type)) {
+            // const allowedTypes = ['asset', 'liability', 'insurance', 'bank'];
+            const allowedTypes = [
+                {
+                    id: "bank",
+                    items: ["Savings", "Current", "Fixed Deposit", "Recurring Deposit"],
+                },
+                { id: "mutual_fund", items: ["Equity", "Debt", "Hybrid", "Index Fund"] },
+                {
+                    id: "insurance",
+                    items: ["Life Insurance", "Health Insurance", "Term Insurance", "ULIP"],
+                },
+                {
+                    id: "property",
+                    items: ["Residential", "Commercial", "Land", "Farmhouse"],
+                },
+                { id: "retirement", items: ["EPF", "PPF", "NPS Tier 1", "NPS Tier 2"] },
+            ];
+
+            if (!allowedTypes.some(t => t.id === assetData.type)) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Invalid type. Must be one of: asset, liability, insurance',
+                    message: 'Invalid type. Must be one of: ' + allowedTypes.map(t => t.id).join(', '),
                     allowedTypes
                 });
             }
+
 
             // Create asset with provided data
             const newAsset = await prisma.asset.create({
@@ -536,7 +557,22 @@ vaultRoutes.get(
 
             return res.status(200).json({
                 success: true,
-                data: types
+                data: [
+                    {
+                        id: "bank",
+                        items: ["Savings", "Current", "Fixed Deposit", "Recurring Deposit"],
+                    },
+                    { id: "mutual_fund", items: ["Equity", "Debt", "Hybrid", "Index Fund"] },
+                    {
+                        id: "insurance",
+                        items: ["Life Insurance", "Health Insurance", "Term Insurance", "ULIP"],
+                    },
+                    {
+                        id: "property",
+                        items: ["Residential", "Commercial", "Land", "Farmhouse"],
+                    },
+                    { id: "retirement", items: ["EPF", "PPF", "NPS Tier 1", "NPS Tier 2"] },
+                ]
             });
         } catch (error) {
             console.error('Error fetching asset types:', error);
