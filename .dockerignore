@@ -41,7 +41,6 @@ Thumbs.db
 *.swo
 
 # Build
-dist
 build
 .next
 .cache

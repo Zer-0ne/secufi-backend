@@ -1,4 +1,4 @@
-# Dockerfile
+# Development Dockerfile
 # Stage 1: Base with Node.js and Python
 FROM node:22-alpine AS base
 
@@ -56,6 +56,7 @@ WORKDIR /app
 # Copy dependencies from previous stage
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY --from=dependencies /usr/lib/python3.* /usr/lib/python3.11
+RUN export NODE_OPTIONS="--max-old-space-size=4096"
 
 # Copy source code
 COPY . .
@@ -65,6 +66,10 @@ COPY extractor.py ./
 
 # Generate Prisma client
 RUN npx prisma generate
+
+
+ENV NODE_OPTIONS="--max-old-space-size=4096"
+
 
 # Build TypeScript
 RUN npm run build
@@ -101,6 +106,6 @@ EXPOSE 5000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD node -e "require('http').get('http://localhost:5000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
+    CMD node -e "require('http').get('http://localhost:5000/health', (r) => {process.exit(r.statusCode === 200 ? 0 : 1)})"
 
 CMD ["node", "dist/index.js"]

@@ -19,13 +19,14 @@ services:
 
   # Main Application Service
   app:
-    build: .
+    build: ./Dockerfile.prod
     container_name: secufi_app
     restart: unless-stopped
     ports:
       - "${PORT:-5000}:${PORT:-5000}"
     environment:
       NODE_ENV: ${NODE_ENV:-development}
+      NODE_OPTIONS: "--max-old-space-size=4096"
       DATABASE_URL: ${DATABASE_URL:-postgresql://${POSTGRES_USER:-secufi_user}:${POSTGRES_PASSWORD:-secufi_password}@postgres:5432/${POSTGRES_DB:-secufi_dev_db}}
       PORT: ${PORT:-5000}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
