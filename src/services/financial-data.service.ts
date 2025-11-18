@@ -66,6 +66,17 @@ export interface AttachmentContent {
  * const service = new FinancialDataService(prisma, aiService);
  * const result = await service.processFinancialEmail(userId, emailData);
  * ```
+ * 
+ * @note Fixed issue with balance and total_value extraction (Nov 2025):
+ * Previously, balance and total_value fields were often null in the database even when 
+ * the AI analysis extracted these values. This was due to incorrect priority ordering 
+ * when extracting financial values from the AI analysis results. The fix ensures:
+ * - Balance prioritizes currentValue > outstandingBalance > amount
+ * - Total value prioritizes totalValue > coverageAmount > amount
+ * This ensures proper financial data storage for all asset types including:
+ * - Investments (mutual funds, stocks) with current values
+ * - Liabilities (loans, credit cards) with outstanding balances
+ * - Insurance policies with coverage amounts
  */
 export class FinancialDataService {
   private prisma: PrismaClient;
@@ -581,19 +592,39 @@ export class FinancialDataService {
               bank_name: extracted.bankName!,
 
               // 💰 Financial Values
-              balance: extracted.amount
-                ? parseFloat(String(extracted.amount))
-                : extracted.financialMetadata?.currentValue
-                  ? parseFloat(String(extracted.financialMetadata.currentValue))
-                  : emailAnalysis.extractedData.amount
-                    ? parseFloat(String(emailAnalysis.extractedData.amount))
-                    : null,
+              // Priority order for balance:
+              // 1. Current value (for assets/investments)
+              // 2. Outstanding balance (for liabilities like loans/credit cards)
+              // 3. Amount (general transaction amount)
+              // 4. Fallback to email analysis balance
+              // Example: For a mutual fund statement, currentValue might be 250000
+              // Example: For a credit card bill, outstandingBalance might be 15000
+              balance: extracted.financialMetadata?.currentValue
+                ? parseFloat(String(extracted.financialMetadata.currentValue))
+                : extracted.financialMetadata?.outstandingBalance
+                  ? parseFloat(String(extracted.financialMetadata.outstandingBalance))
+                  : extracted.amount
+                    ? parseFloat(String(extracted.amount))
+                    : emailAnalysis.extractedData.balance
+                      ? parseFloat(String(emailAnalysis.extractedData.balance))
+                      : null,
 
+              // Priority order for total value:
+              // 1. Total value (for investments/assets with purchase history)
+              // 2. Coverage amount (for insurance policies)
+              // 3. Fallback to email analysis total_value
+              // 4. Amount (general transaction amount)
+              // Example: For an insurance policy, coverageAmount might be 10000000 (1 Crore)
+              // Example: For a mutual fund, totalValue might be 250000 (current value)
               total_value: extracted.financialMetadata?.totalValue
                 ? parseFloat(String(extracted.financialMetadata.totalValue))
-                : emailAnalysis.extractedData.amount
-                  ? parseFloat(String(emailAnalysis.extractedData.amount))
-                  : null,
+                : extracted.financialMetadata?.coverageAmount
+                  ? parseFloat(String(extracted.financialMetadata.coverageAmount))
+                  : emailAnalysis.extractedData.total_value
+                    ? parseFloat(String(emailAnalysis.extractedData.total_value))
+                    : extracted.amount
+                      ? parseFloat(String(extracted.amount))
+                      : null,
 
               // 📊 Status
               // status: extracted.status || 'active', // Deprecated
@@ -864,20 +895,38 @@ export class FinancialDataService {
             emailSubject: emailData.subject,
           });
 
-          // Convert amounts to Decimal for Prisma
-          const balanceValue = extracted.amount
-            ? new Prisma.Decimal(String(extracted.amount))
-            : extracted.financialMetadata?.currentValue
-              ? new Prisma.Decimal(String(extracted.financialMetadata.currentValue))
-              : emailAnalysis.extractedData.amount
-                ? new Prisma.Decimal(String(emailAnalysis.extractedData.amount))
-                : existingAsset.balance;
+           // Convert amounts to Decimal for Prisma
+           // Priority order for balance:
+           // 1. Current value (for assets/investments)
+           // 2. Outstanding balance (for liabilities like loans/credit cards)
+           // 3. Amount (general transaction amount)
+           // 4. Fallback to email analysis balance
+           // 5. Existing asset balance (preserve previous value if no new data)
+           const balanceValue = extracted.financialMetadata?.currentValue
+             ? new Prisma.Decimal(String(extracted.financialMetadata.currentValue))
+             : extracted.financialMetadata?.outstandingBalance
+               ? new Prisma.Decimal(String(extracted.financialMetadata.outstandingBalance))
+               : extracted.amount
+                 ? new Prisma.Decimal(String(extracted.amount))
+                 : emailAnalysis.extractedData.balance
+                   ? new Prisma.Decimal(String(emailAnalysis.extractedData.balance))
+                   : existingAsset.balance;
 
-          const totalValue = extracted.financialMetadata?.totalValue
-            ? new Prisma.Decimal(String(extracted.financialMetadata.totalValue))
-            : emailAnalysis.extractedData.amount
-              ? new Prisma.Decimal(String(emailAnalysis.extractedData.amount))
-              : existingAsset.total_value;
+           // Priority order for total value:
+           // 1. Total value (for investments/assets with purchase history)
+           // 2. Coverage amount (for insurance policies)
+           // 3. Fallback to email analysis total_value
+           // 4. Amount (general transaction amount)
+           // 5. Existing asset total_value (preserve previous value if no new data)
+           const totalValue = extracted.financialMetadata?.totalValue
+             ? new Prisma.Decimal(String(extracted.financialMetadata.totalValue))
+             : extracted.financialMetadata?.coverageAmount
+               ? new Prisma.Decimal(String(extracted.financialMetadata.coverageAmount))
+               : emailAnalysis.extractedData.total_value
+                 ? new Prisma.Decimal(String(emailAnalysis.extractedData.total_value))
+                 : extracted.amount
+                   ? new Prisma.Decimal(String(extracted.amount))
+                   : existingAsset.total_value;
 
           // Update Asset with new data
           const updatedAsset = await this.prisma.asset.update({
@@ -1017,67 +1066,34 @@ export class FinancialDataService {
         // Update existing transaction
         transaction = await this.prisma.transaction.update({
           where: { id: existingAsset.transaction_id },
-          data: {
-            subject: emailData.subject,
-            sender: emailData.from,
-            amount: amountDecimal,
-            currency: emailAnalysis.extractedData.currency || 'INR',
-            transaction_type: emailAnalysis.extractedData.transactionType || 'other',
-            merchant: emailAnalysis.extractedData.merchant || 'Unknown',
-            description: emailAnalysis.extractedData.description
-              ? emailAnalysis.extractedData.description.substring(0, 500)
-              : undefined,
-            transaction_date: transactionDate, // ✅ Fixed: Now using safe parsed date
-            email_date: new Date(emailData.date),
-            status: 'processed',
+              data: {
+                subject: emailData.subject,
+                sender: emailData.from,
+                amount: amountDecimal,
+                currency: emailAnalysis.extractedData.currency || 'INR',
+                transaction_type: emailAnalysis.extractedData.transactionType || 'other',
+                merchant: emailAnalysis.extractedData.merchant || 'Unknown',
+                description: emailAnalysis.extractedData.description
+                  ? emailAnalysis.extractedData.description.substring(0, 500)
+                  : null,
+                transaction_date: transactionDate, // ✅ Fixed: Now using safe parsed date
+                email_date: new Date(emailData.date),
+                status: 'processed',
 
-            raw_data: {
-              emailContent: emailData.body.substring(0, 500),
-              classification,
-              assetIds: updatedAssetIds,
-              updateType: 'email_update',
-            },
+                raw_data: {
+                  emailContent: emailData.body.substring(0, 500),
+                  classification,
+                  assetIds: updatedAssetIds,
+                  updateType: 'email_update',
+                },
 
-            extracted_data: {
-              ...emailAnalysis.extractedData,
-              assetIds: updatedAssetIds,
-              attachmentSummary: attachmentAnalyses,
-              updateTimestamp: new Date().toISOString(),
-            },
-          },
-        });
-      } else {
-        // Create new transaction if doesn't exist
-        transaction = await this.prisma.transaction.create({
-          data: {
-            user_id: userId,
-            email_id: emailData.emailId!,
-            subject: emailData.subject!,
-            sender: emailData.from!,
-            recipient: 'User',
-            amount: amountDecimal,
-            currency: emailAnalysis.extractedData.currency || 'INR',
-            transaction_type: emailAnalysis.extractedData.transactionType || 'other',
-            merchant: emailAnalysis.extractedData.merchant || 'Unknown',
-            description: emailAnalysis.extractedData.description
-              ? emailAnalysis.extractedData.description.substring(0, 500)
-              : undefined,
-            transaction_date: transactionDate, // ✅ Fixed: Now using safe parsed date
-            email_date: new Date(emailData.date),
-            status: 'processed',
-
-            raw_data: {
-              emailContent: emailData.body.substring(0, 500),
-              classification,
-              assetIds: updatedAssetIds,
-            },
-
-            extracted_data: {
-              ...emailAnalysis.extractedData,
-              assetIds: updatedAssetIds,
-              attachmentSummary: attachmentAnalyses,
-            },
-          },
+                extracted_data: {
+                  ...emailAnalysis.extractedData,
+                  assetIds: updatedAssetIds,
+                  attachmentSummary: attachmentAnalyses,
+                  updateTimestamp: new Date().toISOString(),
+                },
+              },
         });
 
         // Link transaction to asset
@@ -1087,12 +1103,12 @@ export class FinancialDataService {
         });
       }
 
-      console.log(`✅ Transaction ${existingAsset.transaction_id ? 'Updated' : 'Created'}: ${transaction.id}`);
+      console.log(`✅ Transaction ${existingAsset.transaction_id ? 'Updated' : 'Created'}: ${transaction?.id}`);
       console.log(`📁 Assets updated: ${updatedAssetIds.length}`);
 
       return {
         updated: true,
-        transactionId: transaction.id,
+        transactionId: transaction?.id,
         emailAnalysis: {
           summary: emailAnalysis.summary,
           keyPoints: emailAnalysis.keyPoints,

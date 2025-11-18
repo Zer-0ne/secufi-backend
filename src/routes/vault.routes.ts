@@ -56,6 +56,160 @@ const vaultRoutes = Router();
 // ============================================================================
 
 /**
+ * POST /create-asset
+ * Create a new asset manually
+ * 
+ * @route POST /create-asset
+ * @middleware authenticateJWT - Validates JWT token and extracts user ID
+ * @body {Object} assetData - Asset information to create
+ * @body {string} name - Asset name (required)
+ * @body {string} type - Asset category: 'asset', 'liability', or 'insurance' (required)
+ * @body {string} [sub_type] - Asset sub-type (e.g., 'mutual_fund', 'credit_card', 'health_insurance')
+ * @body {string} [account_number] - Account number
+ * @body {string} [ifsc_code] - IFSC code
+ * @body {string} [branch_name] - Branch name
+ * @body {string} [bank_name] - Bank name
+ * @body {number} [balance] - Current balance/value
+ * @body {number} [total_value] - Total value/coverage amount
+ * @body {string} [status] - Asset status (default: 'draft')
+ * @body {string} [address] - Asset location/address
+ * @body {string} [nominee] - Nominee details
+ * @body {string} [policy_number] - Policy number (for insurance)
+ * @body {string} [fund_name] - Fund name (for investments)
+ * @body {string} [folio_number] - Folio number (for investments)
+ * @body {string} [crn_number] - CRN number
+ * @body {Object} [document_metadata] - Additional metadata
+ * @returns {Object} 201 - Success response with created asset
+ * @returns {Object} 400 - Bad request if required fields are missing
+ * @returns {Object} 500 - Server error with error message
+ * 
+ * @example
+ * // Request
+ * POST /api/vault/create-asset
+ * Authorization: Bearer <token>
+ * Content-Type: application/json
+ * 
+ * {
+ *   "name": "HDFC Mutual Fund",
+ *   "type": "asset",
+ *   "sub_type": "mutual_fund",
+ *   "fund_name": "HDFC Equity Fund",
+ *   "folio_number": "12345678",
+ *   "balance": 150000,
+ *   "status": "active"
+ * }
+ * 
+ * // Response
+ * {
+ *   "success": true,
+ *   "message": "Asset created successfully",
+ *   "data": {
+ *     "id": "asset123",
+ *     "name": "HDFC Mutual Fund",
+ *     "type": "asset",
+ *     "balance": 150000,
+ *     "createdAt": "2025-11-18T07:45:00Z"
+ *   }
+ * }
+ */
+vaultRoutes.post(
+    '/create-asset',
+    authenticateJWT,
+    async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+        try {
+            const assetData = req.body;
+
+            const assetTypes = await prisma.asset.groupBy({
+                by: ['type'],
+                where: {
+                    user_id: req.user?.userId!
+                }
+            });
+
+            const allowedTypes = assetTypes.map(item => item.type);
+
+            // Validate required fields
+            if (!assetData.name || !assetData.type) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Missing required fields: name and type are required',
+                });
+            }
+
+            // Validate asset type
+            // const allowedTypes = ['asset', 'liability', 'insurance'];
+            if (!allowedTypes.includes(assetData.type)) {
+                return res.status(400).json({
+                    success: false,
+                    message: 'Invalid type. Must be one of: asset, liability, insurance',
+                    allowedTypes
+                });
+            }
+
+            // Create asset with provided data
+            const newAsset = await prisma.asset.create({
+                data: {
+                    user_id: req.user?.userId!,
+                    name: assetData.name,
+                    type: assetData.type,
+                    sub_type: assetData.sub_type || null,
+                    account_number: assetData.account_number || null,
+                    ifsc_code: assetData.ifsc_code || null,
+                    branch_name: assetData.branch_name || null,
+                    bank_name: assetData.bank_name || null,
+                    balance: assetData.balance ? parseFloat(String(assetData.balance)) : null,
+                    total_value: assetData.total_value ? parseFloat(String(assetData.total_value)) : null,
+                    status: assetData.status || 'draft',
+                    last_updated: new Date(),
+                    address: assetData.address || null,
+                    nominee: assetData.nominee || null,
+                    policy_number: assetData.policy_number || null,
+                    fund_name: assetData.fund_name || null,
+                    folio_number: assetData.folio_number || null,
+                    crn_number: assetData.crn_number || null,
+                },
+                select: {
+                    id: true,
+                    user_id: true,
+                    name: true,
+                    type: true,
+                    sub_type: true,
+                    account_number: true,
+                    ifsc_code: true,
+                    branch_name: true,
+                    bank_name: true,
+                    balance: true,
+                    total_value: true,
+                    status: true,
+                    last_updated: true,
+                    address: true,
+                    nominee: true,
+                    policy_number: true,
+                    fund_name: true,
+                    folio_number: true,
+                    crn_number: true,
+                    created_at: true,
+                    updated_at: true,
+                },
+            });
+
+            return res.status(201).json({
+                success: true,
+                message: 'Asset created successfully',
+                data: newAsset,
+            });
+        } catch (error) {
+            console.error('Error creating asset:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to create asset',
+                error: error instanceof Error ? error.message : 'Unknown error',
+            });
+        }
+    }
+);
+
+/**
  * GET /get-assets/
  * Retrieve all assets for the authenticated user
  * 
@@ -344,6 +498,56 @@ const checkValueRequired = async (assetData: Asset, requiredField: keyof Asset |
     return false;
 }
 
+
+
+/**
+ * GET /asset-types
+ * Retrieve all distinct asset types
+ * 
+ * @route GET /asset-types
+ * @middleware authenticateJWT - Validates JWT token and extracts user ID
+ * @returns {Object} 200 - Success response with array of asset types
+ * @returns {Object} 500 - Server error with error message
+ * 
+ * @example
+ * // Request
+ * GET /api/vault/asset-types
+ * Authorization: Bearer <token>
+ * 
+ * // Response
+ * {
+ *   "success": true,
+ *   "data": ["asset", "liability", "insurance"]
+ * }
+ */
+vaultRoutes.get(
+    '/asset-types',
+    authenticateJWT,
+    async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+        try {
+            const assetTypes = await prisma.asset.groupBy({
+                by: ['type'],
+                where: {
+                    user_id: req.user?.userId!
+                }
+            });
+
+            const types = assetTypes.map(item => item.type);
+
+            return res.status(200).json({
+                success: true,
+                data: types
+            });
+        } catch (error) {
+            console.error('Error fetching asset types:', error);
+            return res.status(500).json({
+                success: false,
+                message: 'Failed to fetch asset types',
+                error: error instanceof Error ? error.message : 'Unknown error',
+            });
+        }
+    }
+);
 
 
 export default vaultRoutes;

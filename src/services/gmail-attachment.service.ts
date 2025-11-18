@@ -969,7 +969,7 @@ Processing status: Ready for OCR analysis`;
               error: 'Processing timeout (30s)',
             },
           });
-        }, 300000);
+        }, 3000000);
       } catch (error) {
         console.error('Error spawning Python:', error);
         resolve({

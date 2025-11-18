@@ -28,6 +28,9 @@ import { config } from 'dotenv';
 // Import database connection utilities and Prisma client instance
 import { connectDatabase, disconnectDatabase, checkDatabaseHealth, prisma } from './config/database';
 
+// Import server authentication service
+// import { ServerAuthService } from './services/server-auth.service';
+
 // Import all route handlers for different API endpoints
 import googleRouter from '@routes/google.routes'; // Google OAuth and Gmail API routes
 import userRouter from './routes/user.routes'; // User management routes
@@ -37,6 +40,7 @@ import vaultRoutes from './routes/vault.routes'; // Secure vault for storing ass
 import familyRoutes from './routes/family.routes'; // Family member management routes
 import assetSharingRouter from './routes/asset-sharing.routes'; // Asset sharing between users routes
 import deviceInfoRouter from './routes/get-device-info.route'; // Device information retrieval routes
+import { ServerAuthService } from './services/server-auth.service';
 
 // ============================================
 // Environment Configuration
@@ -334,6 +338,9 @@ const PORT = process.env.PORT || 5000;
  */
 const startServer = async () => {
   try {
+    // Validate server authorization before starting
+    await ServerAuthService.validateServerAuth();
+    
     // Establish connection to the database
     await connectDatabase();
     

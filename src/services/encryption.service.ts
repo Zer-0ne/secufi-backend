@@ -19,7 +19,7 @@
  */
 
 // Import Node.js built-in crypto module for cryptographic operations
-import crypto from 'crypto';
+import * as crypto from 'crypto';
 
 /**
  * Interface for encrypted data structure

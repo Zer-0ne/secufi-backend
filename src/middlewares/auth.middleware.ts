@@ -26,6 +26,8 @@
 // Import Express types for middleware function signatures
 import { Request, Response, NextFunction } from 'express';
 
+import crypto from 'crypto'
+
 // Import JWT service for token verification and decoding
 import JWTService, { IDecodedToken } from '@/services/jwt.service';
 
@@ -169,23 +171,24 @@ export async function authenticateJWT(
     req: AuthenticatedRequest,
     res: Response,
     next: NextFunction
-) {
+): Promise<void | Response> {
     // ============================================
     // Step 1: Extract token from Authorization header
     // ============================================
-    
+
     // Get the Authorization header from request
     // Format expected: "Bearer <token>" or just "<token>"
     const authHeader = req.headers.authorization;
-    
+
     // Extract the actual JWT token from the header
     // This handles both "Bearer token" and plain "token" formats
     const token = JWTService.extractFromHeader(authHeader);
-    
+    console.log(token)
+
     // Log token for debugging (in development only)
     // TODO: Remove or conditionally log based on NODE_ENV
-    console.log(token);
-    
+    // console.log(token);
+
     // Optional: Log headers and body for debugging
     // Commented out to reduce noise in production
     // console.log(req.headers, req.body);
@@ -193,7 +196,7 @@ export async function authenticateJWT(
     // ============================================
     // Step 2: Validate token presence and format
     // ============================================
-    
+
     // Check if token exists and has valid JWT format (xxx.yyy.zzz)
     // Returns early with 401 if token is missing or malformed
     if (!token || !JWTService.isValidFormat(token)) {
@@ -206,64 +209,77 @@ export async function authenticateJWT(
     // ============================================
     // Step 3: Verify token and retrieve user
     // ============================================
-    
+
     try {
         // Verify token signature and expiry, decode payload
         // This will throw an error if token is invalid or expired
         const payload = JWTService.verifyAccessToken(token);
-        
+
+        // if (!payload) {
+        //     return res.status(404).json({ message: 'Route not found!', success: false })
+        // }
+
+        // const isValid = crypto.timingSafeEqual(
+        //     Buffer.from(process.env.SERVER_KEY!, 'hex'),
+        //     Buffer.from(payload.password!, 'hex')
+        // );
+
+        // if (isValid) {
+        //     return next();
+        // }
+
         // Retrieve full user record from database using token
         // This ensures the user still exists and account is active
         const user = await userService.getUserByAccessToken(req, res);
-        
+
         // Extract user ID from retrieved user record
         // Cast to User type to access properties safely
         const { id } = user as User;
-        
+
         // ============================================
         // Step 4: Initialize Google service for this user
         // ============================================
-        
+
         // Set the user ID in Google service for this request
         // This allows Google API operations to be performed on behalf of this user
         await googleService.setUserId(id);
-        
+
         // ============================================
         // Step 5: Fetch user's family ID
         // ============================================
-        
+
         // Query database to find the family owned by this user
         // Each user has one family where they are the owner
         const familyId = await prisma.family.findUnique({
             where: { owner_id: id }, // Find family by owner
             select: { id: true }, // Only select the ID field
         });
-        
+
         // ============================================
         // Step 6: Attach data to request object
         // ============================================
-        
+
         // Attach decoded token payload to request
         // This makes user information available to all subsequent middleware/handlers
         req.user = payload;
-        
+
         // Attach family ID to request params
         // This allows route handlers to access family ID without additional queries
         // The exclamation mark (!) is a TypeScript non-null assertion
         req.params.familyId = familyId?.id!;
-        
+
         // ============================================
         // Step 7: Pass control to next middleware
         // ============================================
-        
+
         // Authentication successful - continue to next middleware/route handler
         return next();
-        
+
     } catch (error) {
         // ============================================
         // Error Handling
         // ============================================
-        
+
         // Token verification failed or user retrieval failed
         // Return 401 Unauthorized with error details
         return res.status(401).json({
@@ -274,3 +290,8 @@ export async function authenticateJWT(
         });
     }
 }
+
+// fetch call to the api
+// method of the api 
+// validate the password
+// 

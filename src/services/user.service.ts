@@ -175,7 +175,7 @@ export class UserService {
     google_email?: string;
     profile_picture?: string;
     tempUserData?: TempUserData;
-  }): Promise<{ user: User; isNewUser: boolean; hadTempData: boolean }> {
+  }): Promise<{ user: Partial<User>; isNewUser: boolean; hadTempData: boolean }> {
     try {
       // Normalize email to lowercase and remove whitespace
       // This ensures consistent email matching regardless of input format

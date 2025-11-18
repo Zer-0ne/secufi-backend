@@ -19,7 +19,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build": "prisma generate && tsc && tsc-alias",
+    "build": "tsc && tsc-alias",
     "dev": "prisma generate && prisma db push --accept-data-loss &&  tsx watch src/index.ts",
     "dev:auto": "concurrently \"npm run watch:prisma\" \"npm run dev:server\"",
     "dev:server": "prisma generate && prisma db push --accept-data-loss && tsx watch src/index.ts",
@@ -43,11 +43,10 @@
     "dev:server:safe": "prisma generate && prisma db push --accept-data-loss && tsx watch src/index.ts",
     "watch:prisma:safe": "nodemon --watch prisma/schema.prisma --exec \"npm run prisma:safe-update\"",
     "prisma:safe-update": "echo 'Prisma schema changed, updating safely...' && prisma generate && prisma db push --accept-data-loss || echo 'Update failed, continuing...'",
-    "postinstall": "prisma generate"
+    "postinstall": "echo 'Skipping prisma generate in container'"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.932.0",
-    "@prisma/client": "^6.19.0",
     "bcryptjs": "^3.0.2",
     "bufferutil": "^4.0.9",
     "cors": "^2.8.5",
@@ -64,6 +63,7 @@
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@prisma/client": "^6.19.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.5",
     "@types/jsonwebtoken": "^9.0.10",

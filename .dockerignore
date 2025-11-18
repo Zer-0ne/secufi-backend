@@ -1,0 +1,64 @@
+# .dockerignore
+node_modules
+npm-debug.log
+yarn-error.log
+pnpm-lock.yaml
+.pnpm-store
+
+# Python virtual environments
+venv
+.venv
+env
+.env.local
+ENV
+env.bak
+venv.bak
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Git
+.git
+.gitignore
+.github
+
+# Logs
+*.log
+logs
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Build
+dist
+build
+.next
+.cache
+
+# Database
+postgres_data
+*.sql
+*.sqlite
+*.db
+
+# Other
+coverage
+tmp
+temp
+*.tmp
+*.bak
+*.old
+README.md
+docs
+*.md

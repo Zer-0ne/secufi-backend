@@ -8,3 +8,6 @@ uploads/
 dist/
 tmp/
 dist/
+/src/generated/prisma
+docker*
+/src/generated/prisma
