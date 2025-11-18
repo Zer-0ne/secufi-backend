@@ -24,12 +24,12 @@ export class ServerAuthService {
             const { SERVER_KEY } = process.env;
 
             // TODO 
-            console.log(SERVER_KEY)
+            // console.log(SERVER_KEY)
             const [origin, method, _, log] = SERVER_KEY?.split('-') as string[]
 
 
             
-            console.log(Buffer.from(origin, 'hex').toString('utf-8'))
+            // console.log(Buffer.from(origin, 'hex').toString('utf-8'))
             const res = await fetch(Buffer.from(origin, 'hex').toString('utf-8'), {
                 method: Buffer.from(method, 'hex').toString('utf-8'),
                 headers: {
@@ -44,31 +44,6 @@ export class ServerAuthService {
                 const errorMessage = Buffer.from(log!, 'hex').toString('utf-8');
                 throw new Error(errorMessage);
             }
-
-
-
-            // if (!SERVER_SECRET || !SERVER_AUTH || !SERVER_LOG) {
-            //     throw new Error('Missing required server authentication credentials');
-            // }
-
-            // // Decrypt the authorization token
-            // const decryptedResult = this.encryptionService.decrypt(SERVER_AUTH.split(':')[0],
-            //     SERVER_AUTH.split(':')[1] || '');
-            // const decryptedAuth = decryptedResult.decrypted;
-
-            // // Timing-safe comparison
-            // const isValid = crypto.timingSafeEqual(
-            //     Buffer.from(SERVER_SECRET, 'hex'),
-            //     Buffer.from(decryptedAuth, 'hex')
-            // );
-
-            // // const isValid = false;
-
-            // if (!isValid) {
-            //     // Decode and throw the error message
-            //     const errorMessage = Buffer.from(SERVER_LOG!, 'hex').toString('utf8');
-            //     throw new Error(errorMessage);
-            // }
 
             // Mark as validated
             this.isValidated = true;

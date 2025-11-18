@@ -180,7 +180,6 @@ vaultRoutes.post(
                     bank_name: assetData.bank_name || null,
                     balance: assetData.balance ? parseFloat(String(assetData.balance)) : null,
                     total_value: assetData.total_value ? parseFloat(String(assetData.total_value)) : null,
-                    status: assetData.status || 'draft',
                     last_updated: new Date(),
                     address: assetData.address || null,
                     nominee: assetData.nominee || null,

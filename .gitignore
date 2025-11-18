@@ -8,3 +8,4 @@ uploads/
 tmp/
 /src/generated/prisma
 /src/generated/prisma
+/test
