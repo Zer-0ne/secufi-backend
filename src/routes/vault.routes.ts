@@ -129,10 +129,10 @@ vaultRoutes.post(
             const allowedTypes = assetTypes.map(item => item.type);
 
             // Validate required fields
-            if (!assetData.name || !assetData.type) {
+            if (!assetData.name || !assetData.type || !assetData.sub_type) {
                 return res.status(400).json({
                     success: false,
-                    message: 'Missing required fields: name and type are required',
+                    message: 'Missing required fields: name, asset subtype and type are required',
                 });
             }
 
