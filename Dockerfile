@@ -1,41 +1,42 @@
-# Development Dockerfile
-# Stage 1: Base with Node.js and Python
-FROM node:22-alpine AS base
+# Production Dockerfile
+FROM node:22-alpine
 
-# Install Python and system dependencies
+# Install build dependencies (temporarily) and runtime dependencies
 RUN apk add --no-cache \
+    # Runtime dependencies (permanent)
     python3 \
     py3-pip \
-    python3-dev \
+    tesseract-ocr \
+    tesseract-ocr-data-eng \
+    poppler-utils \
+    mupdf-dev \
+    freetype-dev \
+    jbig2dec-dev \
+    jpeg-dev \
+    openjpeg-dev \
+    harfbuzz-dev \
+    && ln -sf python3 /usr/bin/python
+
+# Add virtual build dependencies (will be removed later)
+RUN apk add --no-cache --virtual .build-deps \
     gcc \
     g++ \
     make \
     musl-dev \
-    jpeg-dev \
-    zlib-dev \
-    libffi-dev \
-    cairo-dev \
-    pango-dev \
-    gdk-pixbuf-dev \
-    tesseract-ocr \
-    tesseract-ocr-data-eng \
-    poppler-utils \
-    && ln -sf python3 /usr/bin/python
+    python3-dev \
+    clang-dev \
+    linux-headers
 
 WORKDIR /app
-
-# Stage 2: Dependencies
-FROM base AS dependencies
 
 # Copy package files
 COPY package.json package-lock.json* ./
 
-# Install Node.js dependencies
-RUN npm ci || npm install
+# Install ONLY production dependencies (no devDependencies)
+RUN npm ci --only=production
 
-# Install Python dependencies
-COPY requirements.txt* ./
-RUN pip3 install --no-cache-dir \
+# Install Python packages with build dependencies present
+RUN pip3 install --no-cache-dir --break-system-packages \
     PyMuPDF \
     pypdf \
     pdfplumber \
@@ -45,60 +46,27 @@ RUN pip3 install --no-cache-dir \
     Pillow \
     python-docx \
     openpyxl \
-    pandas \
-    || echo "Some Python packages failed to install"
+    pandas
 
-# Stage 3: Build
-FROM base AS build
+# Remove build dependencies to save space (~200MB saved)
+RUN apk del .build-deps
 
-WORKDIR /app
+# Copy pre-built dist folder from your local machine
+COPY dist ./dist
 
-# Copy dependencies from previous stage
-COPY --from=dependencies /app/node_modules ./node_modules
-COPY --from=dependencies /usr/lib/python3.* /usr/lib/python3.11
-RUN export NODE_OPTIONS="--max-old-space-size=4096"
+# Copy Prisma files
+COPY prisma ./prisma
 
-# Copy source code
-COPY . .
+# Generate Prisma client (lightweight operation)
+RUN npx prisma generate
 
 # Copy Python script
 COPY extractor.py ./
 
-# Generate Prisma client
-RUN npx prisma generate
-
-
-ENV NODE_OPTIONS="--max-old-space-size=4096"
-
-
-# Build TypeScript
-RUN npm run build
-
-# Stage 4: Production
-FROM base AS production
-
-WORKDIR /app
-
-# Copy node_modules and Python libs
-COPY --from=dependencies /app/node_modules ./node_modules
-COPY --from=dependencies /usr/lib/python3.* /usr/lib/python3.11
-
-# Copy built application
-COPY --from=build /app/dist ./dist
-COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=build /app/prisma ./prisma
-COPY --from=build /app/extractor.py ./
-
-# Copy package.json and other necessary files
-COPY package.json ./
-COPY tsconfig.json* ./
-
 # Create non-root user
 RUN addgroup -g 1001 -S nodejs && \
-    adduser -S nodejs -u 1001
-
-# Change ownership
-RUN chown -R nodejs:nodejs /app
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
 
 USER nodejs
 

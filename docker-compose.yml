@@ -19,7 +19,7 @@ services:
 
   # Main Application Service
   app:
-    build: ./Dockerfile.prod
+    build: .
     container_name: secufi_app
     restart: unless-stopped
     ports:
