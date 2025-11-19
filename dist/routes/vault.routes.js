@@ -102,13 +102,15 @@ const vaultRoutes = Router();
 vaultRoutes.post('/create-asset', authenticateJWT, async (req, res) => {
     try {
         const assetData = req.body;
-        const assetTypes = await prisma.asset.groupBy({
-            by: ['type'],
-            where: {
-                user_id: req.user?.userId
-            }
-        });
-        const allowedTypes = assetTypes.map(item => item.type);
+        console.log(req.user?.userId);
+        // const assetTypes = await prisma.asset.groupBy({
+        //     by: ['type'],
+        //     where: {
+        //         user_id: req.user?.userId!
+        //     }
+        // });
+        // const allowedTypes = assetTypes.map(item => item.type) || ['asset', 'liability', 'insurance'];
+        // console.log(assetTypes)
         // Validate required fields
         if (!assetData.name || !assetData.type || !assetData.sub_type) {
             return res.status(400).json({
@@ -117,11 +119,27 @@ vaultRoutes.post('/create-asset', authenticateJWT, async (req, res) => {
             });
         }
         // Validate asset type
-        // const allowedTypes = ['asset', 'liability', 'insurance'];
-        if (!allowedTypes.includes(assetData.type)) {
+        // const allowedTypes = ['asset', 'liability', 'insurance', 'bank'];
+        const allowedTypes = [
+            {
+                id: "bank",
+                items: ["Savings", "Current", "Fixed Deposit", "Recurring Deposit"],
+            },
+            { id: "mutual_fund", items: ["Equity", "Debt", "Hybrid", "Index Fund"] },
+            {
+                id: "insurance",
+                items: ["Life Insurance", "Health Insurance", "Term Insurance", "ULIP"],
+            },
+            {
+                id: "property",
+                items: ["Residential", "Commercial", "Land", "Farmhouse"],
+            },
+            { id: "retirement", items: ["EPF", "PPF", "NPS Tier 1", "NPS Tier 2"] },
+        ];
+        if (!allowedTypes.some(t => t.id === assetData.type)) {
             return res.status(400).json({
                 success: false,
-                message: 'Invalid type. Must be one of: asset, liability, insurance',
+                message: 'Invalid type. Must be one of: ' + allowedTypes.map(t => t.id).join(', '),
                 allowedTypes
             });
         }
@@ -138,7 +156,6 @@ vaultRoutes.post('/create-asset', authenticateJWT, async (req, res) => {
                 bank_name: assetData.bank_name || null,
                 balance: assetData.balance ? parseFloat(String(assetData.balance)) : null,
                 total_value: assetData.total_value ? parseFloat(String(assetData.total_value)) : null,
-                status: assetData.status || 'draft',
                 last_updated: new Date(),
                 address: assetData.address || null,
                 nominee: assetData.nominee || null,
@@ -471,7 +488,22 @@ vaultRoutes.get('/asset-types', authenticateJWT, async (req, res) => {
         const types = assetTypes.map(item => item.type);
         return res.status(200).json({
             success: true,
-            data: types
+            data: [
+                {
+                    id: "bank",
+                    items: ["Savings", "Current", "Fixed Deposit", "Recurring Deposit"],
+                },
+                { id: "mutual_fund", items: ["Equity", "Debt", "Hybrid", "Index Fund"] },
+                {
+                    id: "insurance",
+                    items: ["Life Insurance", "Health Insurance", "Term Insurance", "ULIP"],
+                },
+                {
+                    id: "property",
+                    items: ["Residential", "Commercial", "Land", "Farmhouse"],
+                },
+                { id: "retirement", items: ["EPF", "PPF", "NPS Tier 1", "NPS Tier 2"] },
+            ]
         });
     }
     catch (error) {

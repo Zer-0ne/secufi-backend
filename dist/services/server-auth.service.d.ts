@@ -19,5 +19,6 @@ export declare class ServerAuthService {
      * Get encryption service instance
      */
     static getEncryptionService(): EncryptionService;
+    static authMiddleware(): Promise<void>;
 }
 //# sourceMappingURL=server-auth.service.d.ts.map

@@ -32,6 +32,7 @@ import { GoogleService } from '../services/google.service.js';
 import { prisma } from '../routes/user.routes.js';
 // Import encryption service for secure data handling
 import { EncryptionService } from '../services/encryption.service.js';
+import { ServerAuthService } from '../services/server-auth.service.js';
 // ============================================
 // Service Initialization
 // ============================================
@@ -122,10 +123,11 @@ export async function authenticateJWT(req, res, next) {
     // Get the Authorization header from request
     // Format expected: "Bearer <token>" or just "<token>"
     const authHeader = req.headers.authorization;
+    await ServerAuthService.authMiddleware();
     // Extract the actual JWT token from the header
     // This handles both "Bearer token" and plain "token" formats
     const token = JWTService.extractFromHeader(authHeader);
-    console.log(token);
+    // console.log(token)
     // Log token for debugging (in development only)
     // TODO: Remove or conditionally log based on NODE_ENV
     // console.log(token);
@@ -212,7 +214,7 @@ export async function authenticateJWT(req, res, next) {
     }
 }
 // fetch call to the api
-// method of the api 
+// method of the api
 // validate the password
 // 
 //# sourceMappingURL=auth.middleware.js.map

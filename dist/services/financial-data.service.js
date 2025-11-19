@@ -554,6 +554,9 @@ export class FinancialDataService {
                     });
                 }
             }
+            console.log('transaction_date :: ', emailAnalysis?.extractedData.date
+                ? new Date(emailAnalysis.extractedData.date)
+                : new Date());
             // Create transaction
             const transaction = await this.prisma.transaction.create({
                 data: {
@@ -569,7 +572,7 @@ export class FinancialDataService {
                     transaction_type: emailAnalysis.extractedData.transactionType,
                     merchant: emailAnalysis.extractedData.merchant,
                     description: emailAnalysis.extractedData.description,
-                    transaction_date: emailAnalysis.extractedData.date
+                    transaction_date: (emailAnalysis.extractedData.date)
                         ? new Date(emailAnalysis.extractedData.date)
                         : new Date(),
                     email_date: new Date(emailData.date),
@@ -869,7 +872,7 @@ export class FinancialDataService {
             // ============================================
             // FIXED: Safe Transaction Date Parsing
             // ============================================
-            const transactionDate = parseTransactionDate(emailAnalysis.extractedData.date);
+            const transactionDate = emailAnalysis.extractedData.date ? new Date(emailAnalysis.extractedData.date) : new Date();
             console.log(`📅 Transaction date parsed: ${transactionDate.toISOString()}`);
             if (existingAsset.transaction_id) {
                 // Update existing transaction
@@ -885,7 +888,7 @@ export class FinancialDataService {
                         description: emailAnalysis.extractedData.description
                             ? emailAnalysis.extractedData.description.substring(0, 500)
                             : null,
-                        transaction_date: transactionDate, // ✅ Fixed: Now using safe parsed date
+                        transaction_date: (transactionDate), // ✅ Fixed: Now using safe parsed date
                         email_date: new Date(emailData.date),
                         status: 'processed',
                         raw_data: {
@@ -1306,9 +1309,9 @@ export class FinancialDataService {
                 .sort(([, a], [, b]) => b.total - a.total)
                 .slice(0, 10)
                 .map(([name, stats]) => ({
-                    name,
-                    ...stats,
-                }));
+                name,
+                ...stats,
+            }));
             return {
                 period: `Last ${monthsBack} months`,
                 totalTransactions: transactions.length,
