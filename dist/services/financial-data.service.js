@@ -1306,9 +1306,9 @@ export class FinancialDataService {
                 .sort(([, a], [, b]) => b.total - a.total)
                 .slice(0, 10)
                 .map(([name, stats]) => ({
-                name,
-                ...stats,
-            }));
+                    name,
+                    ...stats,
+                }));
             return {
                 period: `Last ${monthsBack} months`,
                 totalTransactions: transactions.length,

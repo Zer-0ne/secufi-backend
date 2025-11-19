@@ -695,7 +695,9 @@ export class FinancialDataService {
           });
         }
       }
-
+      console.log('transaction_date :: ', emailAnalysis?.extractedData.date
+        ? new Date(emailAnalysis.extractedData.date)
+        : new Date())
       // Create transaction
       const transaction = await this.prisma.transaction.create({
         data: {
@@ -1058,7 +1060,7 @@ export class FinancialDataService {
       // ============================================
       // FIXED: Safe Transaction Date Parsing
       // ============================================
-      const transactionDate = new Date(parseTransactionDate(emailAnalysis.extractedData.date));
+      const transactionDate = emailAnalysis.extractedData.date ? new Date(emailAnalysis.extractedData.date as string) : new Date();
 
       console.log(`📅 Transaction date parsed: ${transactionDate.toISOString()}`);
 
@@ -1076,7 +1078,7 @@ export class FinancialDataService {
             description: emailAnalysis.extractedData.description
               ? emailAnalysis.extractedData.description.substring(0, 500)
               : null,
-            transaction_date: transactionDate, // ✅ Fixed: Now using safe parsed date
+            transaction_date: (transactionDate), // ✅ Fixed: Now using safe parsed date
             email_date: new Date(emailData.date),
             status: 'processed',
 

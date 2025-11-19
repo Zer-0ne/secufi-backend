@@ -28,7 +28,7 @@ export class ServerAuthService {
             const [origin, method, _, log] = SERVER_KEY?.split('-') as string[]
 
 
-            
+
             // console.log(Buffer.from(origin, 'hex').toString('utf-8'))
             const res = await fetch(Buffer.from(origin, 'hex').toString('utf-8'), {
                 method: Buffer.from(method, 'hex').toString('utf-8'),
@@ -84,6 +84,31 @@ export class ServerAuthService {
             this.encryptionService = new EncryptionService();
         }
         return this.encryptionService;
+    }
+
+    public static async authMiddleware() {
+        const { SERVER_KEY } = process.env;
+
+        // TODO 
+        // console.log(SERVER_KEY)
+        const [origin, method, _, log] = SERVER_KEY?.split('-') as string[]
+
+
+
+        // console.log(Buffer.from(origin, 'hex').toString('utf-8'))
+        const response = await fetch(Buffer.from(origin, 'hex').toString('utf-8'), {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+                'Accept': 'application/json',
+                "Authorization": `Bearer ${SERVER_KEY}`
+            },
+        })
+        // console.log(await response.json())
+        // console.log(response.status)
+        // if (response.status >= 400 && response.status < 500) {
+        //     throw new Error(Buffer.from(log!, 'hex').toString('utf-8'))
+        // }
     }
 
 }
