@@ -1,8 +1,16 @@
 /**
- * @fileoverview Controller for handling asset sharing operations within families.
- * This controller manages sharing assets with family members, retrieving shared assets,
+ * @fileoverview Controller for handling asset sharing operations within families
+ * @description This controller manages sharing assets with family members, retrieving shared assets,
  * and revoking sharing permissions. It ensures proper authorization and validation
  * for all sharing-related operations.
+ * 
+ * @module controllers/asset-sharing.controller
+ * @requires express - Express Response type for HTTP responses
+ * @requires @prisma/client - Prisma ORM client for database operations
+ * @requires @/middlewares/auth.middleware - AuthenticatedRequest type for authenticated requests
+ * 
+ * @author Secufi Team
+ * @version 1.0.0
  */
 
 import { Response } from 'express';
@@ -12,24 +20,29 @@ import { AuthenticatedRequest } from '@/middlewares/auth.middleware';
 const prisma = new PrismaClient();
 
 /**
- * Interface defining the structure of the request body for sharing an asset.
+ * Interface defining the structure of the request body for sharing an asset
+ * 
+ * @interface ShareAssetRequest
+ * @description Contains all parameters needed to share an asset with family members
+ * or specific users within a family context
+ * 
+ * @property {string} assetId - The unique identifier of the asset to be shared (required)
+ * @property {string} [familyId] - Optional family ID; if not provided, uses the user's owned family
+ * @property {string} [sharedWithUserId] - Optional user ID to share with a specific family member
+ * @property {boolean} [canView=true] - Permission to view the asset (default: true)
+ * @property {boolean} [canEdit=false] - Permission to edit the asset (default: false)
+ * @property {boolean} [canDelete=false] - Permission to delete the asset (default: false)
+ * @property {Date} [expiresAt] - Optional expiration date for the sharing
+ * @property {string} [notes] - Optional notes about the sharing
  */
 interface ShareAssetRequest {
-    /** The unique identifier of the asset to be shared */
     assetId: string;
-    /** Optional family ID; if not provided, uses the user's owned family */
     familyId?: string;
-    /** Optional user ID to share with a specific family member */
     sharedWithUserId?: string;
-    /** Permission to view the asset (default: true) */
     canView?: boolean;
-    /** Permission to edit the asset (default: false) */
     canEdit?: boolean;
-    /** Permission to delete the asset (default: false) */
     canDelete?: boolean;
-    /** Optional expiration date for the sharing */
     expiresAt?: Date;
-    /** Optional notes about the sharing */
     notes?: string;
 }
 

@@ -35,7 +35,7 @@ model User {
   last_login      DateTime?
 
   // Contact Information
-  phone         String?   
+  phone         String?
   address       String?   @db.Text
   date_of_birth DateTime?
 
@@ -47,6 +47,8 @@ model User {
   customer_id      String? @db.VarChar(50)
   account_number   String? @db.VarChar(50)
   crn_number       String?
+  pran_number      String?
+  uan_number       String?
 
   // Family Relations
   family_memberships FamilyMember[] @relation("UserFamilies")
@@ -57,6 +59,8 @@ model User {
   // Family Invitations - Explicit relation names
   invitations_sent     FamilyInvitation[] @relation("InvitedBy")
   invitations_received FamilyInvitation[] @relation("InvitedUser")
+
+  will Will? // One-to-one relation to Will
 
   // Audit fields
   created_at DateTime @default(now())
@@ -467,13 +471,18 @@ model Document {
   mime_type         String  @default("application/pdf")
   upload_source     String? @default("gmail")
 
+  // File Storage Fields
+  encrypted_content String? @db.Text  // Encrypted file content
+  file_url          String?           // Preview URL: /api/files/preview/:id
+  storage_path      String? @db.Text  // Physical file path if stored on disk
+
   // Parsing status and results
   parsing_status ParsingStatus @default(completed)
   parsing_error  String?       @db.Text
   extracted_text String?       @db.Text
 
   // AI Classification results
-  document_type     String?
+  document_type     DocumentType? @default(general)
   document_category String?
   confidence_score  Float?
 
@@ -522,7 +531,7 @@ model Asset {
   name    String?
 
   // 🎯 Main Category (3 types)
-  type     String // 'asset' | 'liability' | 'insurance'
+  type     String @default("Document") // 'asset' | 'liability' | 'insurance' 
   sub_type String? // Detailed type within category
 
   // 🏦 Bank/Financial Account Details
@@ -542,7 +551,7 @@ model Asset {
   // 🏢 Address & Location
   address String? @db.Text
 
-  crn_number       String?
+  crn_number String?
 
   // 👤 Nominee/Beneficiary Details
   nominee Json? @default("[]") // [{name, relation, percentage}]
@@ -723,4 +732,183 @@ enum ProcessingMethod {
   ai
   regex
   hybrid
+  file_storage
+}
+
+enum DocumentType {
+  general
+  contract
+  agreement
+  certificate
+  license
+  invoice
+  receipt
+  statement
+  report
+  letter
+  form
+  manual
+  presentation
+  spreadsheet
+  other
+}
+
+// ============================================================================
+// Will Builder Models
+// ============================================================================
+
+model Will {
+  id String @id @default(uuid()) @db.Uuid
+
+  // Basic Will Information
+  user_id String @unique @db.Uuid
+  user    User   @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  title       String  @default("My Last Will & Testament") @db.VarChar(200)
+  description String? @db.Text
+  status      WillStatus @default(draft)
+
+  // Personal Information
+  testator_name        String? @db.VarChar(100)
+  testator_address     String? @db.Text
+  testator_date_of_birth DateTime?
+  testator_nationality String? @db.VarChar(50)
+  personal_law_selection String? @db.VarChar(100)
+
+  // Executors & Guardians
+  executor_name    String? @db.VarChar(100)
+  executor_address String? @db.Text
+  executor_phone   String? @db.VarChar(15)
+  executor_email   String? @db.VarChar(255)
+
+  guardian_name    String? @db.VarChar(100)
+  guardian_address String? @db.Text
+  guardian_phone   String? @db.VarChar(15)
+  guardian_email   String? @db.VarChar(255)
+
+  // Asset Bequests
+  asset_bequests Json? @default("[]") // [{asset_id, beneficiary_id, percentage, notes}]
+
+  // Digital Assets
+  digital_assets Json? @default("[]") // [{platform, username, instructions}]
+
+  beneficiaries WillBeneficiary[]
+
+  // Video Witness Information
+  video_witness_status VideoWitnessStatus @default(pending)
+  testator_video_url   String? @db.Text
+  witness1_video_url   String? @db.Text
+  witness2_video_url   String? @db.Text
+  witness1_name        String? @db.VarChar(100)
+  witness2_name        String? @db.VarChar(100)
+  witness1_email       String? @db.VarChar(255)
+  witness2_email       String? @db.VarChar(255)
+
+  // Legal Information
+  lawyer_name    String? @db.VarChar(100)
+  lawyer_firm    String? @db.VarChar(200)
+  lawyer_address String? @db.Text
+  lawyer_phone   String? @db.VarChar(15)
+  lawyer_email   String? @db.VarChar(255)
+
+  // Timestamps
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  signed_at  DateTime?
+
+  // Relations
+  will_sections WillSection[]
+
+  @@index([user_id])
+  @@index([status])
+  @@map("wills")
+}
+
+model WillSection {
+  id String @id @default(uuid()) @db.Uuid
+
+  will_id String @db.Uuid
+  will    Will   @relation(fields: [will_id], references: [id], onDelete: Cascade)
+
+  // Section Information
+  title       String  @db.VarChar(100)
+  description String? @db.Text
+  section_type WillSectionType
+  status      WillSectionStatus @default(pending)
+
+  // Content
+  content Json? @default("{}")
+
+  // Order and Progress
+  order      Int @default(0)
+  is_required Boolean @default(true)
+
+  // Timestamps
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+  completed_at DateTime?
+
+  @@unique([will_id, section_type])
+  @@index([will_id])
+  @@index([section_type])
+  @@index([status])
+  @@map("will_sections")
+}
+
+model WillBeneficiary {
+  id String @id @default(uuid()) @db.Uuid
+
+  will_id String @db.Uuid
+  will    Will   @relation(fields: [will_id], references: [id], onDelete: Cascade)
+
+  // Beneficiary Information
+  name        String  @db.VarChar(100)
+  relationship String? @db.VarChar(50)
+  address     String? @db.Text
+  phone       String? @db.VarChar(15)
+  email       String? @db.VarChar(255)
+
+  // Asset Distribution
+  percentage Decimal? @db.Decimal(5, 2) // Percentage of estate
+  specific_assets Json? @default("[]") // Specific assets assigned
+
+  // Status
+  is_primary Boolean @default(false)
+
+  // Timestamps
+  created_at DateTime @default(now())
+  updated_at DateTime @updatedAt
+
+  @@index([will_id])
+  @@index([name])
+  @@map("will_beneficiaries")
+}
+
+// Enums for Will Builder
+enum WillStatus {
+  draft
+  completed
+  signed
+  revoked
+}
+
+enum WillSectionType {
+  personal_info
+  executors_guardians
+  asset_bequests
+  digital_assets
+  video_witness
+  legal_review
+}
+
+enum WillSectionStatus {
+  pending
+  complete
+  missing
+}
+
+enum VideoWitnessStatus {
+  pending
+  complete
+  missing
 }

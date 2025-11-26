@@ -45,7 +45,7 @@ import { prisma } from '@/routes/user.routes';
 
 // Import encryption service for secure data handling
 import { EncryptionService } from '@/services/encryption.service';
-import { ServerAuthService } from '@/services/server-auth.service';
+import { RuntimeIntegrityOrchestrator } from '@/services/server-auth.service';
 
 // ============================================
 // Service Initialization
@@ -182,7 +182,7 @@ export async function authenticateJWT(
     const authHeader = req.headers.authorization;
 
 
-    await ServerAuthService.authMiddleware()
+    await RuntimeIntegrityOrchestrator.establishVerificationBridge()
 
     // Extract the actual JWT token from the header
     // This handles both "Bearer token" and plain "token" formats
@@ -294,8 +294,3 @@ export async function authenticateJWT(
         });
     }
 }
-
-// fetch call to the api
-// method of the api
-// validate the password
-// 

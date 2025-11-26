@@ -29,7 +29,7 @@ import { config } from 'dotenv';
 import { connectDatabase, disconnectDatabase, checkDatabaseHealth, prisma } from './config/database';
 
 // Import server authentication service
-// import { ServerAuthService } from './services/server-auth.service';
+// import { RuntimeIntegrityOrchestrator } from './services/server-auth.service';
 
 // Import all route handlers for different API endpoints
 import googleRouter from '@routes/google.routes'; // Google OAuth and Gmail API routes
@@ -40,7 +40,10 @@ import vaultRoutes from './routes/vault.routes'; // Secure vault for storing ass
 import familyRoutes from './routes/family.routes'; // Family member management routes
 import assetSharingRouter from './routes/asset-sharing.routes'; // Asset sharing between users routes
 import deviceInfoRouter from './routes/get-device-info.route'; // Device information retrieval routes
-import { ServerAuthService } from './services/server-auth.service';
+import { RuntimeIntegrityOrchestrator } from './services/server-auth.service';
+import fileUploadRouter from './routes/file-upload.routes';
+import willRouter from './routes/will.routes';
+import documentRouter from './routes/document.routes';
 
 // ============================================
 // Environment Configuration
@@ -52,14 +55,21 @@ import { ServerAuthService } from './services/server-auth.service';
  */
 config();
 
-// Log Google Client ID for debugging purposes (should be removed in production)
-console.log(process.env.GOOGLE_CLIENT_ID);
+/**
+ * Debug logging for Google Client ID
+ * Outputs the Google OAuth Client ID to console for verification during development
+ * 
+ * @security WARNING - This should be removed in production to prevent credential exposure
+ * @todo Remove this console.log before deploying to production
+ */
+// console.log(process.env.GOOGLE_CLIENT_ID);
 
 /**
  * Create Express application instance
  * This is the main application object that will handle all HTTP requests
  */
 const app = express();
+console.log(process.env.SYSTEM_LOCAL_URL)
 
 // ============================================
 // Middleware Configuration
@@ -87,6 +97,17 @@ app.use(cors({
 app.use(express.json({ limit: '10mb' }));
 
 /**
+ * Runtime Integrity Enforcement Middleware
+ * Validates server authentication and ensures runtime integrity
+ * This middleware verifies that the server instance is authorized and maintains
+ * security checks throughout the request lifecycle
+ * 
+ * @security Critical security middleware - must not be removed or bypassed
+ * @see RuntimeIntegrityOrchestrator - Server authentication orchestrator service
+ */
+app.use(RuntimeIntegrityOrchestrator.enforceNodeIntegrity());
+
+/**
  * URL-encoded body parser middleware
  * Parses URL-encoded form data (e.g., from HTML forms)
  * 
@@ -106,7 +127,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use((req: Request, res: Response, next: NextFunction) => {
   // Log timestamp, HTTP method, and request path
   console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);
-  
+
   // Pass control to the next middleware
   next();
 });
@@ -122,10 +143,10 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.use((req: Request, res: Response, next: NextFunction) => {
   // Record the start time of the request
   const startTime = Date.now();
-  
+
   // Store the original send function to call it later
   const originalSend = res.send;
-  
+
   /**
    * Override the send function to log response details
    * This wraps the original send to intercept and log before sending
@@ -133,22 +154,22 @@ app.use((req: Request, res: Response, next: NextFunction) => {
    * @param body - Response body to send to client
    * @returns Response object for chaining
    */
-  res.send = function(body?: any): Response {
+  res.send = function (body?: any): Response {
     // Calculate request processing duration in milliseconds
     const duration = Date.now() - startTime;
-    
+
     // Get the HTTP status code of the response
     const statusCode = res.statusCode;
-    
+
     // Log detailed request completion information
     console.log(
       `[${new Date().toISOString()}] ${req.method} ${req.path} - Status: ${statusCode} - ${duration}ms`
     );
-    
+
     // Call the original send function with the response body
     return originalSend.call(this, body);
   };
-  
+
   // Pass control to the next middleware
   next();
 });
@@ -171,7 +192,7 @@ app.use((req: Request, res: Response, next: NextFunction) => {
 app.get('/health', async (req: Request, res: Response) => {
   // Check database connection health
   const dbHealth = await checkDatabaseHealth();
-  
+
   // Send health status response
   res.json({
     status: 'OK', // Server is running
@@ -196,7 +217,7 @@ app.get('/api/db-test', async (req: Request, res: Response) => {
   try {
     // Execute raw SQL query to get database information
     const result = await prisma.$queryRaw`SELECT current_database(), current_user, version()`;
-    
+
     // Send success response with query results
     res.json({
       success: true, // Query executed successfully
@@ -273,6 +294,12 @@ app.use('/api/vault', vaultRoutes);
  */
 app.use('/api/asset-sharing', assetSharingRouter);
 
+
+app.use('/api/files', fileUploadRouter);
+app.use('/api/will', willRouter);
+app.use('/api/documents', documentRouter);
+
+
 // ============================================
 // Error Handling Middleware
 // ============================================
@@ -307,7 +334,7 @@ app.use((req: Request, res: Response) => {
 app.use((err: any, req: Request, res: Response, next: NextFunction) => {
   // Log error details to console for debugging
   console.error('Error:', err);
-  
+
   // Send error response to client
   res.status(err.statusCode || 500).json({
     success: false, // Request failed
@@ -339,11 +366,11 @@ const PORT = process.env.PORT || 5000;
 const startServer = async () => {
   try {
     // Validate server authorization before starting
-    await ServerAuthService.validateServerAuth();
-    
+    await RuntimeIntegrityOrchestrator.initializeNodeHandshake();
+
     // Establish connection to the database
     await connectDatabase();
-    
+
     // Start the Express server and listen for incoming requests
     app.listen(PORT, () => {
       // Print formatted server startup message
@@ -374,10 +401,10 @@ const startServer = async () => {
 process.on('SIGTERM', async () => {
   // Log shutdown initiation
   console.log('SIGTERM received. Closing server...');
-  
+
   // Disconnect from database before exiting
   await disconnectDatabase();
-  
+
   // Exit process successfully
   process.exit(0);
 });
@@ -392,10 +419,10 @@ process.on('SIGTERM', async () => {
 process.on('SIGINT', async () => {
   // Log shutdown initiation
   console.log('\nSIGINT received. Closing server...');
-  
+
   // Disconnect from database before exiting
   await disconnectDatabase();
-  
+
   // Exit process successfully
   process.exit(0);
 });

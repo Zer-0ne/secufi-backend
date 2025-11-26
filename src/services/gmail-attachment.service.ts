@@ -87,14 +87,14 @@ export class GmailAttachmentService {
    * const service2 = new GmailAttachmentService(); // Uses default directory
    * ```
    */
-  constructor(uploadDir: string = './uploads/attachments') {
-    this.uploadDir = uploadDir;
+  constructor(uploadDir?: string) {
+    this.uploadDir = uploadDir || '';
 
-    if (!fs.existsSync(this.uploadDir)) {
-      fs.mkdirSync(this.uploadDir, {
-        recursive: true,
-      });
-    }
+    // if (!fs.existsSync(this.uploadDir)) {
+    //   fs.mkdirSync(this.uploadDir, {
+    //     recursive: true,
+    //   });
+    // }
   }
 
   /**
@@ -851,21 +851,106 @@ Processing status: Ready for OCR analysis`;
 
         // Check if PDF is protected
         const isProtected = await this.checkPdfProtection(tmpFile);
-        const user = await prisma.user.findUnique({
-          where: { id: this.userId },
-        });
+        
+        // ✅ AI PASSWORD GUESSING: If protected and no password provided
+        if (isProtected && !password) {
+          console.log(`🤖 PDF is locked, attempting AI password guessing...`);
+          
+          const user = await prisma.user.findUnique({
+            where: { id: this.userId },
+          });
 
-        // Generate passwords for protected PDFs
-        const result = await passwordGeneratorService.generatePasswordsForPDF(
-          filename || 'document',
-          user as any
-        );
+          if (user) {
+            // Prepare user data for AI
+            const userData = {
+              name: user.name,
+              email: user.email,
+              phone: user.phone,
+              date_of_birth: user.date_of_birth?.toISOString(),
+              pan_number: user.pan_number,
+              aadhar_number: user.aadhar_number,
+              account_number: user.account_number,
+              crn_number: user.crn_number,
+              pran_number: user.pran_number,
+              uan_number: user.uan_number,
+              customer_id: user.customer_id
+            };
 
-        console.log('result.passwords :::', result);
+            // Use AI service to guess password
+            const AIService = require('./ai.service').AIService;
+            const aiService = new AIService();
+            
+            const aiResult = await aiService.guessPasswordWithAI(
+              filename,
+              userData,
+              {
+                extractedText: '',
+                errorMessage: 'PDF is password protected',
+                fileSize: buffer.length
+              },
+              3 // Max 3 attempts
+            );
 
-        // Pass password if PDF is protected
+            if (aiResult.success && aiResult.passwords && aiResult.passwords.length > 0) {
+              console.log(`🔑 Testing ${aiResult.passwords.length} AI-generated passwords...`);
+              
+              // Try each password
+              for (let i = 0; i < aiResult.passwords.length; i++) {
+                const testPassword = aiResult.passwords[i];
+                console.log(`🔐 Attempt ${i + 1}/${aiResult.passwords.length}: Testing password...`);
+                
+                // Test with Python extractor
+                const testArgs = [path.join(process.cwd(), 'extractor.py'), tmpFile, '-p', testPassword];
+                
+                try {
+                  const testResult = await new Promise<boolean>((testResolve) => {
+                    const testPython = spawn('python3', testArgs, {
+                      timeout: 10000, // 10 second timeout per test
+                      stdio: ['pipe', 'pipe', 'pipe'],
+                    });
+                    
+                    let testStdout = '';
+                    testPython.stdout.on('data', (data) => {
+                      testStdout += data.toString();
+                    });
+                    
+                    testPython.on('close', (code) => {
+                      const isSuccess = code === 0 && testStdout.length > 100 && 
+                                       !testStdout.toLowerCase().includes('password protected');
+                      testResolve(isSuccess);
+                    });
+                    
+                    setTimeout(() => {
+                      testPython.kill();
+                      testResolve(false);
+                    }, 10000);
+                  });
+                  
+                  if (testResult) {
+                    console.log(`✅ SUCCESS! File unlocked with AI-guessed password`);
+                    password = testPassword;
+                    break;
+                  } else {
+                    console.log(`❌ Password failed`);
+                  }
+                } catch (error) {
+                  console.log(`❌ Password test error: ${(error as Error).message}`);
+                }
+              }
+              
+              if (!password) {
+                console.log(`❌ All ${aiResult.passwords.length} AI password attempts failed`);
+              }
+            } else {
+              console.log(`❌ AI could not generate password candidates`);
+            }
+          }
+        }
+
+        // Pass password if available (manually provided or AI-guessed)
         if (password) {
           args.push('-p', password);
+          console.log(`🔑 Using password for extraction`);
         }
 
         // Spawn Python process with 30-second timeout

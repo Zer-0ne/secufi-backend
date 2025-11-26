@@ -16,7 +16,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 
 # Install ONLY production Node.js dependencies
-RUN npm ci --only=production
+# RUN npm ci --only=production # comment this for prisma generate error prisma is in devDependency and version 6 and in build version 7 is used that it gives an error
+RUN npm ci
 
 # Install Python packages (uses pre-built wheels - FAST!)
 RUN pip3 install --no-cache-dir --break-system-packages \
@@ -39,6 +40,9 @@ COPY prisma ./prisma
 
 # Generate Prisma client (no DB connection needed)
 RUN npx prisma generate
+
+# ✅ Now remove dev dependencies
+RUN npm prune --production && npm install prisma@6.19.0
 
 # Copy Python script
 COPY extractor.py ./

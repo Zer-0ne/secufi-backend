@@ -1,22 +1,45 @@
-// middleware/assetPermission.middleware.ts
+/**
+ * @fileoverview Asset access control middleware
+ * @description This middleware provides comprehensive asset permission checking
+ * for authenticated users. It evaluates ownership, shared permissions, and family
+ * role-based permissions to determine access levels for asset operations.
+ * 
+ * @module middlewares/asset-access.middleware
+ * @requires express - Express Response and NextFunction types
+ * @requires @prisma/client - Prisma ORM client for database operations
+ * @requires @/middlewares/auth.middleware - AuthenticatedRequest type
+ * 
+ * @author Secufi Team
+ * @version 1.0.0
+ */
 
-// Import necessary modules from Express for handling HTTP requests and responses
 import { Response, NextFunction } from 'express';
-// Import PrismaClient for database interactions
 import { PrismaClient } from '@prisma/client';
-// Import custom AuthenticatedRequest type from auth middleware
 import { AuthenticatedRequest } from './auth.middleware';
 
-// Initialize Prisma client instance for database operations
+/**
+ * Prisma client instance for database operations
+ */
 const prisma = new PrismaClient();
 
-// Define interface for asset permissions structure
+/**
+ * Interface defining the structure of asset permissions
+ * 
+ * @interface AssetPermissions
+ * @description Represents the access permissions a user has for a specific asset
+ * 
+ * @property {boolean} canView - Permission to view the asset
+ * @property {boolean} canEdit - Permission to edit the asset
+ * @property {boolean} canDelete - Permission to delete the asset
+ * @property {boolean} isOwner - Indicates if the user is the owner
+ * @property {'owner' | 'shared' | 'family_role'} source - Source of the permission
+ */
 interface AssetPermissions {
-  canView: boolean;    // Permission to view the asset
-  canEdit: boolean;    // Permission to edit the asset
-  canDelete: boolean;  // Permission to delete the asset
-  isOwner: boolean;    // Indicates if the user is the owner
-  source: 'owner' | 'shared' | 'family_role'; // Source of the permission
+  canView: boolean;
+  canEdit: boolean;
+  canDelete: boolean;
+  isOwner: boolean;
+  source: 'owner' | 'shared' | 'family_role';
 }
 
 /**

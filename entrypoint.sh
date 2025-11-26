@@ -1,14 +1,20 @@
 #!/bin/sh
 set -e
 
-echo "Waiting for PostgreSQL to be ready..."
-until npx prisma db push --accept-data-loss 2>/dev/null || npx prisma migrate deploy; do
-  echo "PostgreSQL is unavailable - sleeping"
-  sleep 2
-done
+echo "🚀 Starting Secufi Backend..."
 
-echo "PostgreSQL is up - running migrations"
-npx prisma migrate deploy
+# Simple PostgreSQL wait
+echo "⏳ Waiting for database..."
+sleep 5
 
-echo "Starting application..."
+# Run migrations if prisma is available
+if [ -f "node_modules/.bin/prisma" ]; then
+    echo "📦 Running migrations..."
+    node_modules/.bin/prisma migrate deploy --skip-generate || \
+    node_modules/.bin/prisma db push --accept-data-loss --skip-generate || \
+    echo "⚠️  Migration skipped"
+fi
+
+# Start server
+echo "✅ Starting server..."
 exec node dist/index.js

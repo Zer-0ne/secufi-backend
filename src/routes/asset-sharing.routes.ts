@@ -1,10 +1,29 @@
-// routes/assetSharing.routes.ts
+/**
+ * @fileoverview Asset sharing API routes
+ * @description This module defines all API routes related to asset sharing functionality.
+ * It handles sharing assets with families or specific users, retrieving shared assets,
+ * revoking sharing permissions, and accessing assets with proper permission checks.
+ * 
+ * @module routes/asset-sharing.routes
+ * @requires express - Express Router for route definition
+ * @requires @/middlewares/auth.middleware - JWT authentication middleware
+ * @requires @/config/database - Prisma database client
+ * @requires @/controllers/asset-sharing.controller - Asset sharing controller methods
+ * @requires @/middlewares/asset-access.middleware - Asset permission checking middleware
+ * 
+ * @author Secufi Team
+ * @version 1.0.0
+ */
+
 import { Router } from 'express';
 import { authenticateJWT } from '@/middlewares/auth.middleware';
 import { prisma } from '@/config/database';
 import { AssetSharingController } from '@/controllers/asset-sharing.controller';
 import { checkAssetAccess } from '@/middlewares/asset-access.middleware';
 
+/**
+ * Express router for asset sharing operations
+ */
 const assetSharingRouter = Router();
 
 // Share asset with family/user

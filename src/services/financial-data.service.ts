@@ -1,4 +1,4 @@
-import { Asset, Prisma, PrismaClient } from '@prisma/client';
+import { Asset, DocumentType, Prisma, PrismaClient } from '@prisma/client';
 import { AIService } from './ai.service';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -550,7 +550,7 @@ export class FinancialDataService {
         documentType: this.guessDocumentType(emailData.subject),
       }, userId);
 
-      console.log('📊 Email Analysis:', emailAnalysis);
+      // console.log('📊 Email Analysis:', emailAnalysis);
 
       if (emailAnalysis.extractedData.confidence < 40) {
         console.log(`⚠️ Low confidence: ${emailAnalysis.extractedData.confidence}%`);
@@ -571,7 +571,51 @@ export class FinancialDataService {
 
 
           const extracted = emailAnalysis.extractedData;
-          console.log('extracted data :: ', emailAnalysis.extractedData)
+          // console.log('extracted data :: ', emailAnalysis.extractedData)
+
+          // ✅ ENHANCED BALANCE EXTRACTION: Extract balance from metadata before asset creation
+          console.log('\n🔍 Extracting balance from metadata before asset creation...');
+          const balanceExtraction = await this.aiService.extractBalanceFromMetadata(
+            {
+              aiAnalysis: extracted,
+              financialMetadata: extracted.financialMetadata,
+              attachmentAnalysis: attachmentAnalysis.extractedData,
+              keyFindings: emailAnalysis.keyPoints || [],
+              description: extracted.description
+            },
+            extracted.assetCategory || 'asset'
+          );
+
+          console.log(`📊 Balance extraction result:`);
+          console.log(`   Balance: ${balanceExtraction.balance !== null ? `₹${balanceExtraction.balance}` : 'null'}`);
+          console.log(`   Total Value: ${balanceExtraction.total_value !== null ? `₹${balanceExtraction.total_value}` : 'null'}`);
+          console.log(`   Confidence: ${balanceExtraction.confidence}%`);
+          console.log(`   Reasoning: ${balanceExtraction.reasoning}`);
+
+          // ✅ VERIFICATION STEP: Check if this is actually financial data
+          // console.log('\n🔍 Verifying if extracted data is financial...');
+          // const verification = await this.aiService.verifyFinancialContent(
+          //   emailAnalysis.extracted_content,
+          //   attachment.content,
+          //   attachment.filename
+          // );
+
+          // console.log(`📊 Verification Result: ${verification.isFinancial ? '✅ FINANCIAL' : '❌ NOT FINANCIAL'}`);
+          // console.log(`   Confidence: ${verification.confidence}%`);
+          // console.log(`   Reason: ${verification.reason}`);
+
+          // // Skip saving if not financial data
+          // if (!verification.isFinancial) {
+          //   console.log(`⏭️  Skipping asset creation for: ${attachment.filename}`);
+          //   console.log(`   Reason: ${verification.reason}`);
+          //   if (verification.recommendations && verification.recommendations.length > 0) {
+          //     console.log(`   Recommendations:`);
+          //     verification.recommendations.forEach(rec => console.log(`      - ${rec}`));
+          //   }
+          //   continue; // Skip this attachment
+          // }
+
+          // console.log(`✅ Verified as financial data, proceeding to save...`);
 
           // console.log(`Extracted Data :: ${JSON.stringify(extracted)}`)
 
@@ -579,11 +623,12 @@ export class FinancialDataService {
           const assetRecord = await this.prisma.asset.create({
             data: {
               user_id: userId!,
-              name: `${extracted.assetCategory?.toUpperCase()}: ${extracted.merchant || attachment.filename}`,
+              name: `${extracted.assetCategory?.toUpperCase() || 'ASSET'}: ${extracted.merchant || attachment.filename}`,
 
               // 🎯 3-Category Classification
-              type: extracted.assetCategory,
-              sub_type: extracted.assetType,
+              // Default to 'asset' if category is not detected
+              type: extracted.assetCategory || 'asset',
+              sub_type: extracted.assetType || 'other',
 
               // 🏦 Bank Details
               account_number: extracted.accountNumber,
@@ -591,40 +636,42 @@ export class FinancialDataService {
               branch_name: extracted.branchName!,
               bank_name: extracted.bankName!,
 
-              // 💰 Financial Values
+              // 💰 Financial Values - Enhanced extraction from metadata
               // Priority order for balance:
-              // 1. Current value (for assets/investments)
-              // 2. Outstanding balance (for liabilities like loans/credit cards)
-              // 3. Amount (general transaction amount)
-              // 4. Fallback to email analysis balance
-              // Example: For a mutual fund statement, currentValue might be 250000
-              // Example: For a credit card bill, outstandingBalance might be 15000
-              balance: extracted.financialMetadata?.currentValue
-                ? parseFloat(String(extracted.financialMetadata.currentValue))
-                : extracted.financialMetadata?.outstandingBalance
-                  ? parseFloat(String(extracted.financialMetadata.outstandingBalance))
-                  : extracted.amount
-                    ? parseFloat(String(extracted.amount))
-                    : emailAnalysis.extractedData.balance
-                      ? parseFloat(String(emailAnalysis.extractedData.balance))
-                      : null,
-
-              // Priority order for total value:
-              // 1. Total value (for investments/assets with purchase history)
-              // 2. Coverage amount (for insurance policies)
-              // 3. Fallback to email analysis total_value
+              // 1. Enhanced balance extraction from metadata (highest priority)
+              // 2. Current value (for assets/investments)
+              // 3. Outstanding balance (for liabilities like loans/credit cards)
               // 4. Amount (general transaction amount)
-              // Example: For an insurance policy, coverageAmount might be 10000000 (1 Crore)
-              // Example: For a mutual fund, totalValue might be 250000 (current value)
-              total_value: extracted.financialMetadata?.totalValue
-                ? parseFloat(String(extracted.financialMetadata.totalValue))
-                : extracted.financialMetadata?.coverageAmount
-                  ? parseFloat(String(extracted.financialMetadata.coverageAmount))
-                  : emailAnalysis.extractedData.total_value
-                    ? parseFloat(String(emailAnalysis.extractedData.total_value))
+              // 5. Fallback to email analysis balance
+              balance: balanceExtraction.balance !== null
+                ? parseFloat(String(balanceExtraction.balance))
+                : extracted.financialMetadata?.currentValue
+                  ? parseFloat(String(extracted.financialMetadata.currentValue))
+                  : extracted.financialMetadata?.outstandingBalance
+                    ? parseFloat(String(extracted.financialMetadata.outstandingBalance))
                     : extracted.amount
                       ? parseFloat(String(extracted.amount))
-                      : null,
+                      : emailAnalysis.extractedData.balance
+                        ? parseFloat(String(emailAnalysis.extractedData.balance))
+                        : null,
+
+              // Priority order for total value:
+              // 1. Enhanced total value extraction from metadata (highest priority)
+              // 2. Total value (for investments/assets with purchase history)
+              // 3. Coverage amount (for insurance policies)
+              // 4. Fallback to email analysis total_value
+              // 5. Amount (general transaction amount)
+              total_value: balanceExtraction.total_value !== null
+                ? parseFloat(String(balanceExtraction.total_value))
+                : extracted.financialMetadata?.totalValue
+                  ? parseFloat(String(extracted.financialMetadata.totalValue))
+                  : extracted.financialMetadata?.coverageAmount
+                    ? parseFloat(String(extracted.financialMetadata.coverageAmount))
+                    : emailAnalysis.extractedData.total_value
+                      ? parseFloat(String(emailAnalysis.extractedData.total_value))
+                      : extracted.amount
+                        ? parseFloat(String(extracted.amount))
+                        : null,
 
               // 📊 Status
               // status: extracted.status || 'active', // Deprecated
@@ -713,7 +760,7 @@ export class FinancialDataService {
           transaction_type: emailAnalysis.extractedData.transactionType!,
           merchant: emailAnalysis.extractedData.merchant!,
           description: emailAnalysis.extractedData.description!,
-          transaction_date: (emailAnalysis.extractedData.date)
+          transaction_date: emailAnalysis.extractedData.date && !isNaN(new Date(emailAnalysis.extractedData.date).getTime())
             ? new Date(emailAnalysis.extractedData.date)
             : new Date(),
           email_date: new Date(emailData.date),
@@ -861,7 +908,7 @@ export class FinancialDataService {
         userId
       );
 
-      console.log('📊 Email Analysis:', emailAnalysis);
+      // console.log('📊 Email Analysis:', emailAnalysis);
 
       if (emailAnalysis.extractedData.confidence < 40) {
         console.log(`⚠️ Low confidence: ${emailAnalysis.extractedData.confidence}%`);
@@ -885,6 +932,25 @@ export class FinancialDataService {
           // console.log('extracted data :: ', emailAnalysis.extractedData);
           // console.log('extracted data :: ', JSON.stringify(emailAnalysis.extracted_content));
 
+          // ✅ ENHANCED BALANCE EXTRACTION: Extract balance from metadata before asset update
+          console.log('\n🔍 Extracting balance from metadata before asset update...');
+          const balanceExtraction = await this.aiService.extractBalanceFromMetadata(
+            {
+              aiAnalysis: extracted,
+              financialMetadata: extracted.financialMetadata,
+              attachmentAnalysis: attachmentAnalysis.extractedData,
+              keyFindings: emailAnalysis.keyPoints || [],
+              description: extracted.description
+            },
+            extracted.assetCategory || 'asset'
+          );
+
+          console.log(`📊 Balance extraction result:`);
+          console.log(`   Balance: ${balanceExtraction.balance !== null ? `₹${balanceExtraction.balance}` : 'null'}`);
+          console.log(`   Total Value: ${balanceExtraction.total_value !== null ? `₹${balanceExtraction.total_value}` : 'null'}`);
+          console.log(`   Confidence: ${balanceExtraction.confidence}%`);
+          console.log(`   Reasoning: ${balanceExtraction.reasoning}`);
+
           // Preserve previous metadata for audit trail
           const previousMetadata = existingAsset.document_metadata as any;
           const updateHistory = previousMetadata?.updateHistory || [];
@@ -899,36 +965,42 @@ export class FinancialDataService {
 
           // Convert amounts to Decimal for Prisma
           // Priority order for balance:
-          // 1. Current value (for assets/investments)
-          // 2. Outstanding balance (for liabilities like loans/credit cards)
-          // 3. Amount (general transaction amount)
-          // 4. Fallback to email analysis balance
-          // 5. Existing asset balance (preserve previous value if no new data)
-          const balanceValue = extracted.financialMetadata?.currentValue
-            ? new Prisma.Decimal(String(extracted.financialMetadata.currentValue))
-            : extracted.financialMetadata?.outstandingBalance
-              ? new Prisma.Decimal(String(extracted.financialMetadata.outstandingBalance))
-              : extracted.amount
-                ? new Prisma.Decimal(String(extracted.amount))
-                : emailAnalysis.extractedData.balance
-                  ? new Prisma.Decimal(String(emailAnalysis.extractedData.balance))
-                  : existingAsset.balance;
-
-          // Priority order for total value:
-          // 1. Total value (for investments/assets with purchase history)
-          // 2. Coverage amount (for insurance policies)
-          // 3. Fallback to email analysis total_value
+          // 1. Enhanced balance extraction from metadata (highest priority)
+          // 2. Current value (for assets/investments)
+          // 3. Outstanding balance (for liabilities like loans/credit cards)
           // 4. Amount (general transaction amount)
-          // 5. Existing asset total_value (preserve previous value if no new data)
-          const totalValue = extracted.financialMetadata?.totalValue
-            ? new Prisma.Decimal(String(extracted.financialMetadata.totalValue))
-            : extracted.financialMetadata?.coverageAmount
-              ? new Prisma.Decimal(String(extracted.financialMetadata.coverageAmount))
-              : emailAnalysis.extractedData.total_value
-                ? new Prisma.Decimal(String(emailAnalysis.extractedData.total_value))
+          // 5. Fallback to email analysis balance
+          // 6. Existing asset balance (preserve previous value if no new data)
+          const balanceValue = balanceExtraction.balance !== null
+            ? new Prisma.Decimal(String(balanceExtraction.balance))
+            : extracted.financialMetadata?.currentValue
+              ? new Prisma.Decimal(String(extracted.financialMetadata.currentValue))
+              : extracted.financialMetadata?.outstandingBalance
+                ? new Prisma.Decimal(String(extracted.financialMetadata.outstandingBalance))
                 : extracted.amount
                   ? new Prisma.Decimal(String(extracted.amount))
-                  : existingAsset.total_value;
+                  : emailAnalysis.extractedData.balance
+                    ? new Prisma.Decimal(String(emailAnalysis.extractedData.balance))
+                    : existingAsset.balance;
+
+          // Priority order for total value:
+          // 1. Enhanced total value extraction from metadata (highest priority)
+          // 2. Total value (for investments/assets with purchase history)
+          // 3. Coverage amount (for insurance policies)
+          // 4. Fallback to email analysis total_value
+          // 5. Amount (general transaction amount)
+          // 6. Existing asset total_value (preserve previous value if no new data)
+          const totalValue = balanceExtraction.total_value !== null
+            ? new Prisma.Decimal(String(balanceExtraction.total_value))
+            : extracted.financialMetadata?.totalValue
+              ? new Prisma.Decimal(String(extracted.financialMetadata.totalValue))
+              : extracted.financialMetadata?.coverageAmount
+                ? new Prisma.Decimal(String(extracted.financialMetadata.coverageAmount))
+                : emailAnalysis.extractedData.total_value
+                  ? new Prisma.Decimal(String(emailAnalysis.extractedData.total_value))
+                  : extracted.amount
+                    ? new Prisma.Decimal(String(extracted.amount))
+                    : existingAsset.total_value;
 
           // Update Asset with new data
           const updatedAsset = await this.prisma.asset.update({
@@ -1060,7 +1132,9 @@ export class FinancialDataService {
       // ============================================
       // FIXED: Safe Transaction Date Parsing
       // ============================================
-      const transactionDate = emailAnalysis.extractedData.date ? new Date(emailAnalysis.extractedData.date as string) : new Date();
+      const transactionDate = emailAnalysis.extractedData.date && !isNaN(new Date(emailAnalysis.extractedData.date).getTime())
+        ? new Date(emailAnalysis.extractedData.date)
+        : new Date();
 
       console.log(`📅 Transaction date parsed: ${transactionDate.toISOString()}`);
 
@@ -1347,11 +1421,17 @@ export class FinancialDataService {
           user_id: userId,
           OR: [
             { filename: { contains: query, mode: 'insensitive' } },
+            { original_filename: { contains: query, mode: 'insensitive' } },
             { extracted_text: { contains: query, mode: 'insensitive' } },
-            { document_type: { contains: query, mode: 'insensitive' } },
             { document_category: { contains: query, mode: 'insensitive' } },
+            {
+              document_type: {
+                in: query ? this.getMatchingDocumentTypes(query) : null
+              }
+            }
           ],
         },
+        orderBy: { created_at: 'desc' },
       });
 
       return {
@@ -1365,6 +1445,35 @@ export class FinancialDataService {
       throw error;
     }
   }
+  /**
+ * Get matching document types based on search query
+ */
+  private getMatchingDocumentTypes(query: string): DocumentType[] {
+    const lowerQuery = query.toLowerCase();
+    const allTypes: DocumentType[] = [
+      'general',
+      'contract',
+      'agreement',
+      'certificate',
+      'license',
+      'invoice',
+      'receipt',
+      'statement',
+      'report',
+      'letter',
+      'form',
+      'manual',
+      'presentation',
+      'spreadsheet',
+      'other'
+    ];
+
+    // Return types that match the query
+    return allTypes.filter(type =>
+      type.toLowerCase().includes(lowerQuery)
+    );
+  }
+
 
   /**
    * Get transaction details by ID

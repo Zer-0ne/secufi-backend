@@ -1114,7 +1114,7 @@ export class FamilyController {
         where: { id: userId },
       });
 
-      if (user?.email !== invitation.invited_email) {
+      if (user?.email?.toLocaleLowerCase() !== invitation.invited_email?.toLocaleLowerCase()) {
         return res.status(403).json({
           success: false,
           message: 'This invitation is not for you',

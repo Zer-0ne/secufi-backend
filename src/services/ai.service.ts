@@ -1,8 +1,39 @@
+/**
+ * @fileoverview AI service for financial data analysis and password guessing
+ * @description This service provides AI-powered analysis of financial documents,
+ * email classification, password guessing for encrypted files, and financial data
+ * extraction using AWS Bedrock and OpenAI APIs.
+ * 
+ * @module services/ai.service
+ * @requires @/config/database - Prisma database client
+ * @requires ./financial-data.service - Financial data service interfaces
+ * @requires @/types/google - Email message types
+ * @requires @aws-sdk/client-bedrock-runtime - AWS Bedrock client
+ * @requires @prisma/client - Prisma database types
+ * 
+ * @author Secufi Team
+ * @version 1.0.0
+ */
+
 import { prisma } from "@/config/database";
 import { AttachmentContent, EmailData } from "./financial-data.service";
 import { EmailMessage } from "@/types/google";
 import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+import { Asset } from "@prisma/client";
+import { bedrockQueue } from "./queue.service";
 
+/**
+ * Interface defining the structure of financial analysis requests
+ * 
+ * @interface FinancialAnalysisRequest
+ * @description Contains all data needed for AI-powered financial analysis
+ * 
+ * @property {string} emailContent - The content of the email to analyze
+ * @property {string} subject - The email subject line
+ * @property {string} sender - The sender's email address
+ * @property {AttachmentContent[]} [attachmentContents] - Optional array of attachment contents
+ * @property {string} documentType - Type of document being analyzed
+ */
 interface FinancialAnalysisRequest {
   emailContent: string;
   subject: string;
@@ -11,7 +42,7 @@ interface FinancialAnalysisRequest {
   documentType: string;
 }
 
-interface EnhancedFinancialData {
+export interface EnhancedFinancialData {
   // Transaction fields
   transactionType: 'invoice' | 'payment' | 'receipt' | 'statement' | 'bill' | 'tax' | 'credit_card' | 'other';
   amount: number | null;
@@ -24,7 +55,7 @@ interface EnhancedFinancialData {
   confidence: number;
 
   // Asset Classification (3 main categories)
-  assetCategory: 'asset' | 'liability' | 'insurance';
+  assetCategory: 'asset' | 'liability' | 'insurance' | 'other';
   assetType: string;
   assetSubType: string | null;
 
@@ -140,7 +171,7 @@ interface AnalysisResult {
   issues: string[];
   required_fields: string[];
   attachmentAnalyses: any
-  extracted_content:any
+  extracted_content: any
 }
 
 
@@ -151,6 +182,10 @@ export class AIService {
   private bedrockApiKey: string;
   private bedrockEndpoint: string;
   private modelId: string;
+
+  // Cache for API responses to avoid duplicate calls
+  private apiCache: Map<string, { response: string; timestamp: number }> = new Map();
+  private cacheTtl = 5 * 60 * 1000; // 5 minutes
 
   constructor(openaiKey?: string) {
     this.openaiKey = openaiKey || process.env.OPENAI_API_KEY || '';
@@ -164,118 +199,658 @@ export class AIService {
 
     // badrock 
     this.bedrockApiKey = process.env.AWS_BEARER_TOKEN_BEDROCK || '';
-    const awsRegion = process.env.AWS_REGION || 'us-east-1';
+    const awsRegion = 'us-east-1';
     this.bedrockEndpoint = `https://bedrock-runtime.${awsRegion}.amazonaws.com`;
 
     // Choose your model
     this.modelId = 'anthropic.claude-3-sonnet-20240229-v1:0';
-
-    if (!this.bedrockApiKey) {
-      throw new Error('AWS_BEARER_TOKEN_BEDROCK environment variable is required');
-    }
+    // this.modelId = 'amazon.nova-lite-v1:0';
 
     console.log('✓ AWS Bedrock configured with API key authentication');
     console.log('✓ Model:', this.modelId);
   }
 
-  private async callBedrock(prompt: string, systemPrompt?: string): Promise<string> {
-    try {
-      console.log('⟳ Calling AWS Bedrock API...');
+  public async checkEnv() {
+    this.bedrockApiKey = await process.env.AWS_BEARER_TOKEN_BEDROCK || '';
 
-      let body: any;
-
-      if (this.modelId.includes('claude')) {
-        // Claude model format (WITHOUT thinking parameter for REST API)
-        body = {
-          anthropic_version: "bedrock-2023-05-31",
-          max_tokens: 8000,
-          messages: [
-            {
-              role: "user",
-              content: prompt
-            }
-          ],
-          temperature: 0.3,
-          top_p: 0.95,
-        };
-
-        // Add system prompt if provided
-        if (systemPrompt) {
-          body.system = systemPrompt;
-        }
-
-      } else if (this.modelId.includes('titan')) {
-        // Amazon Titan format
-        body = {
-          inputText: prompt,
-          textGenerationConfig: {
-            maxTokenCount: 8000,
-            stopSequences: [],
-            temperature: 0.3,
-            topP: 0.95,
-          }
-        };
-      } else if (this.modelId.includes('llama')) {
-        // Meta Llama format
-        body = {
-          prompt: prompt,
-          max_gen_len: 8000,
-          temperature: 0.3,
-          top_p: 0.95,
-        };
-      }
-
-      // Make HTTP request with Bearer token
-      const url = `${this.bedrockEndpoint}/model/${this.modelId}/invoke`;
-
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'Authorization': `Bearer ${this.bedrockApiKey}`
-        },
-        body: JSON.stringify(body)
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error(`Bedrock API error: ${errorText}`);
-        throw new Error(`Bedrock API error (${response.status}): ${errorText}`);
-      }
-
-      const modelResponse = await response.json() as any;
-      console.log('✓ Bedrock response received');
-
-      // Extract text based on model type
-      if (this.modelId.includes('claude')) {
-        // Claude 3.5 Sonnet response structure
-        let fullResponse = '';
-
-        // Extract main content
-        if (modelResponse.content && Array.isArray(modelResponse.content)) {
-          for (const block of modelResponse.content) {
-            if (block.type === 'text') {
-              fullResponse += block.text;
-            }
-          }
-        }
-
-        return fullResponse || modelResponse.content[0]?.text || '';
-
-      } else if (this.modelId.includes('titan')) {
-        return modelResponse.results[0].outputText;
-
-      } else if (this.modelId.includes('llama')) {
-        return modelResponse.generation;
-      }
-
-      throw new Error('Unsupported model response format');
-
-    } catch (error) {
-      console.error('AWS Bedrock API failed:', error);
-      throw error;
+    if (!this.bedrockApiKey) {
+      throw new Error('AWS_BEARER_TOKEN_BEDROCK environment variable is required');
     }
+  }
+
+  private async callBedrock(prompt: string, systemPrompt?: string, retries: number = 3): Promise<string> {
+    return bedrockQueue.addToQueue<string>(async () => {
+      // Check cache first
+      const cacheKey = `${prompt.substring(0, 100)}_${systemPrompt?.substring(0, 50) || 'no_system'}`;
+      const cached = this.apiCache.get(cacheKey);
+
+      if (cached && Date.now() - cached.timestamp < this.cacheTtl) {
+        console.log('✓ Using cached Bedrock response');
+        return cached.response;
+      }
+
+      let lastError: Error | null = null;
+
+      for (let attempt = 1; attempt <= retries; attempt++) {
+        try {
+          console.log(`⟳ Calling AWS Bedrock API... (Attempt ${attempt}/${retries})`);
+          await this.checkEnv()
+
+          let body: any;
+
+          if (this.modelId.includes('claude')) {
+            // Claude model format (WITHOUT thinking parameter for REST API)
+            body = {
+              anthropic_version: "bedrock-2023-05-31",
+              max_tokens: 15000,
+              messages: [
+                {
+                  role: "user",
+                  content: prompt
+                }
+              ],
+              temperature: 0.3,
+              top_p: 0.95,
+            };
+
+            // Add system prompt if provided
+            if (systemPrompt) {
+              body.system = systemPrompt;
+            }
+
+          } else if (this.modelId.includes('titan')) {
+            // Amazon Titan format
+            body = {
+              inputText: prompt,
+              textGenerationConfig: {
+                maxTokenCount: 8000,
+                stopSequences: [],
+                temperature: 0.3,
+                topP: 0.95,
+              }
+            };
+          } else if (this.modelId.includes('nova')) {
+            // Amazon Nova model format (NEW)
+            body = {
+              messages: [
+                {
+                  role: "user",
+                  content: [
+                    {
+                      text: prompt
+                    }
+                  ]
+                }
+              ],
+              inferenceConfig: {
+                max_new_tokens: 10000,
+                temperature: 0.3,
+                top_p: 0.95
+              }
+            };
+
+            // Add system prompt if provided
+            if (systemPrompt) {
+              body.system = [
+                {
+                  text: systemPrompt
+                }
+              ];
+            }
+
+          } else if (this.modelId.includes('llama')) {
+            // Meta Llama format
+            body = {
+              prompt: prompt,
+              max_gen_len: 8000,
+              temperature: 0.3,
+              top_p: 0.95,
+            };
+          }
+
+          // Make HTTP request with Bearer token
+          const url = `${this.bedrockEndpoint}/model/${this.modelId}/invoke`;
+
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Authorization': `Bearer ${this.bedrockApiKey}`
+            },
+            body: JSON.stringify(body)
+          });
+
+          // Check if response is not OK (non-200 status)
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error(`❌ Bedrock API error (${response.status}): ${errorText}`);
+
+            // Determine if error is retryable
+            const isRetryable = this.isRetryableError(response.status);
+
+            if (!isRetryable) {
+              // Don't retry for client errors (4xx except 429)
+              throw new Error(`Bedrock API error (${response.status}): ${errorText}`);
+            }
+
+            // If retryable and not last attempt, continue to retry
+            if (attempt < retries) {
+              const waitTime = this.calculateBackoffDelay(attempt);
+              console.log(`⏳ Retrying after ${waitTime}ms... (${retries - attempt} retries left)`);
+              await this.sleep(waitTime);
+              continue; // Retry
+            }
+
+            // Last attempt failed
+            throw new Error(`Bedrock API error after ${retries} attempts (${response.status}): ${errorText}`);
+          }
+
+          const modelResponse = await response.json() as any;
+          console.log('✓ Bedrock response received successfully');
+
+          // Cache the successful response
+          this.apiCache.set(cacheKey, {
+            response: modelResponse,
+            timestamp: Date.now()
+          });
+
+          // Extract text based on model type
+          if (this.modelId.includes('claude')) {
+            // Claude 3.5 Sonnet response structure
+            let fullResponse = '';
+
+            // Extract main content
+            if (modelResponse.content && Array.isArray(modelResponse.content)) {
+              for (const block of modelResponse.content) {
+                if (block.type === 'text') {
+                  fullResponse += block.text;
+                }
+              }
+            }
+
+            return fullResponse || modelResponse.content[0]?.text || '';
+
+          } else if (this.modelId.includes('titan')) {
+            return modelResponse.results[0].outputText;
+
+          } else if (this.modelId.includes('llama')) {
+            return modelResponse.generation;
+          }
+
+          throw new Error('Unsupported model response format');
+
+        } catch (error) {
+          lastError = error as Error;
+          console.error(`❌ AWS Bedrock API attempt ${attempt} failed:`, error);
+
+          // If not last attempt, retry
+          if (attempt < retries) {
+            const waitTime = this.calculateBackoffDelay(attempt);
+            console.log(`⏳ Retrying after ${waitTime}ms... (${retries - attempt} retries left)`);
+            await this.sleep(waitTime);
+          }
+        }
+      }
+
+      // All retries exhausted
+      throw new Error(`AWS Bedrock API failed after ${retries} attempts: ${lastError?.message}`);
+
+    })
+  }
+
+  /**
+   * Determines if an HTTP status code is retryable
+   */
+  private isRetryableError(statusCode: number): boolean {
+    // Retry on:
+    // - 429 (Too Many Requests)
+    // - 500-599 (Server Errors)
+    // - 408 (Request Timeout)
+    return statusCode === 429 || statusCode === 408 || (statusCode >= 500 && statusCode < 600);
+  }
+
+  /**
+   * Calculate exponential backoff delay
+   */
+  private calculateBackoffDelay(attempt: number): number {
+    // Conservative backoff for AWS Bedrock rate limiting: 5s, 15s, 30s...
+    const baseDelay = 5000; // 5 seconds
+    const maxDelay = 60000; // 60 seconds max
+    const delay = Math.min(baseDelay * Math.pow(2, attempt - 1), maxDelay);
+
+    // Add jitter (random ±30%)
+    const jitter = delay * 0.3 * (Math.random() - 0.5);
+    return Math.floor(delay + jitter);
+  }
+
+  /**
+   * Sleep utility for retry delays
+   */
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Batch multiple API calls to reduce rate limiting
+   */
+  private async batchBedrockCalls(requests: Array<{ prompt: string; systemPrompt?: string }>): Promise<string[]> {
+    const results: string[] = [];
+
+    // Process requests sequentially with delay between batches
+    for (const request of requests) {
+      try {
+        const result = await this.callBedrock(request.prompt, request.systemPrompt);
+        results.push(result);
+
+        // Add delay between calls to avoid rate limiting
+        if (requests.length > 1) {
+          await this.sleep(1000); // 1 second delay between calls
+        }
+      } catch (error) {
+        console.error(`❌ Batch API call failed:`, error);
+        results.push(''); // Return empty string on failure
+      }
+    }
+
+    return results;
+  }
+
+  /**
+   * 🔐 AI-Powered Password Guessing with Retry Logic
+   * Tries to guess PDF password using AI analysis with 3 attempts
+   */
+  async guessPasswordWithAI(
+    filename: string,
+    userData: any,
+    pdfMetadata?: {
+      extractedText?: string;
+      errorMessage?: string;
+      fileSize?: number;
+    },
+    maxAttempts: number = 3
+  ): Promise<{
+    success: boolean;
+    passwords: string[];
+    attempts: Array<{
+      attemptNumber: number;
+      passwords: string[];
+      reasoning: string;
+    }>;
+    finalRecommendation?: string;
+  }> {
+    const attempts: Array<{
+      attemptNumber: number;
+      passwords: string[];
+      reasoning: string;
+    }> = [];
+
+    console.log('\n' + '='.repeat(70));
+    console.log('🤖 AI-POWERED PASSWORD GUESSING');
+    console.log('='.repeat(70));
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      console.log(`\n🔄 Attempt ${attempt}/${maxAttempts}`);
+
+      try {
+        // Build context from previous attempts
+        const previousAttemptsContext = attempts
+          .map(
+            (a) =>
+              `Attempt ${a.attemptNumber}: Tried [${a.passwords.join(', ')}] - FAILED\nReasoning: ${a.reasoning}`
+          )
+          .join('\n\n');
+
+        const prompt = `You are an expert PDF password cracker. Analyze the following information and suggest the MOST LIKELY passwords for this encrypted PDF.
+
+═══════════════════════════════════════════════════════════
+FILE INFORMATION
+═══════════════════════════════════════════════════════════
+Filename: ${filename}
+File Size: ${pdfMetadata?.fileSize || 'Unknown'}
+Error Message: ${pdfMetadata?.errorMessage || 'Password protected'}
+Extracted Text Preview: ${pdfMetadata?.extractedText?.substring(0, 500) || 'None'}
+
+═══════════════════════════════════════════════════════════
+USER DATA AVAILABLE
+═══════════════════════════════════════════════════════════
+${JSON.stringify(userData, null, 2)}
+
+═══════════════════════════════════════════════════════════
+PREVIOUS FAILED ATTEMPTS (${attempts.length})
+═══════════════════════════════════════════════════════════
+${previousAttemptsContext || 'This is the first attempt'}
+
+═══════════════════════════════════════════════════════════
+ANALYSIS INSTRUCTIONS
+═══════════════════════════════════════════════════════════
+
+1. DETECT BANK/INSTITUTION from filename:
+   - Look for bank names: SBI, HDFC, ICICI, Axis, Kotak, IDFC, IndusInd, Yes Bank, RBL, etc.
+   - Look for institutions: LIC, IRCTC, EPF, NPS, mutual funds, insurance companies
+
+2. ANALYZE DATE OF BIRTH FORMATS:
+   ${userData.date_of_birth ? `
+   User's DOB: ${userData.date_of_birth}
+   Common DOB formats to try:
+   - DDMMYYYY (e.g., 15061990)
+   - DDMMYY (e.g., 150690)
+   - YYYYMMDD (e.g., 19900615)
+   - DD-MM-YYYY (e.g., 15-06-1990)
+   - DD/MM/YYYY (e.g., 15/06/1990)
+   - YYYY (just year, e.g., 1990)
+   - MMDDYYYY (US format)
+   - Reverse formats: MMDDYY, YYMMDD
+   ` : 'DOB not available'}
+
+3. BANK-SPECIFIC PASSWORD PATTERNS:
+   - SBI: Usually account number or mobile number
+   - HDFC: Customer ID, name+card_last_4
+   - ICICI: name(4 chars) + DDMM from DOB
+   - Axis: name(4 chars) + account_last_4
+   - IDFC: DDMMYYYY or DDMMYY format
+   - Kotak: CRN number
+   - LIC: Policy number or DOB variants
+   - EPF: UAN number or DOB
+   - NPS: PRAN number
+   
+4. COMMON PATTERNS:
+   - First 4 letters of name + DOB
+   - Account number or last 4 digits
+   - PAN number (uppercase/lowercase)
+   - Phone number (last 10 or 4 digits)
+   - Customer ID / CRN
+   - Common passwords: password, 123456, 0000, 1111
+
+5. ANALYZE PREVIOUS FAILURES:
+   ${attempts.length > 0 ? `
+   - What patterns were already tried?
+   - What variations are still untested?
+   - What alternative formats should we explore?
+   - Consider case sensitivity, special characters, spacing
+   - Try combining fields differently
+   - Consider typos or alternate spellings
+   ` : 'No previous attempts to analyze'}
+
+6. SPECIAL CONSIDERATIONS:
+   - Check if filename/error message hints at password format
+   - Some PDFs use UPPERCASE, some lowercase, some mixed
+   - Special characters like @, #, _, - might be used
+   - Spaces might be part of password
+   - Sometimes password is empty string ""
+   - Bank name or institution name might be part of password
+
+═══════════════════════════════════════════════════════════
+RESPONSE FORMAT (JSON ONLY)
+═══════════════════════════════════════════════════════════
+
+Return ONLY valid JSON in this exact format:
+
+{
+  "passwords": [
+    "password1",
+    "password2",
+    "password3",
+    "password4",
+    "password5"
+  ],
+  "reasoning": "Detailed explanation of why these passwords were chosen, what patterns were considered, and why they are likely to work based on the available data and previous failures.",
+  "confidence": 85,
+  "recommendedNext": "If this attempt fails, suggest what to try next"
+}
+
+IMPORTANT:
+- Return 5-10 UNIQUE passwords (most likely first)
+- DO NOT repeat passwords from previous attempts
+- Focus on UNTESTED variations
+- Prioritize based on bank/institution patterns
+- Consider DOB format variations thoroughly
+- Return ONLY JSON, no additional text
+
+Begin analysis now:`;
+
+        const response = await this.callBedrock(prompt);
+        const jsonMatch = response.match(/\{[\s\S]*\}/);
+
+        if (!jsonMatch) {
+          console.error('❌ Failed to parse AI response');
+
+          // Use fallback on parse failure
+          const fallbackPasswords = this.generateFallbackPasswords(userData, attempt);
+          attempts.push({
+            attemptNumber: attempt,
+            passwords: fallbackPasswords,
+            reasoning: 'AI response parsing failed, using fallback strategy',
+          });
+          continue;
+        }
+
+        const aiResult = JSON.parse(jsonMatch[0]);
+
+        // Filter out passwords that were already tried
+        const alreadyTried = new Set(
+          attempts.flatMap((a) => a.passwords.map(p => p.toLowerCase()))
+        );
+        const newPasswords = aiResult.passwords.filter(
+          (p: string) => !alreadyTried.has(p.toLowerCase())
+        );
+
+        if (newPasswords.length === 0) {
+          console.log('⚠️ AI suggested no new passwords, using fallback');
+          const fallbackPasswords = this.generateFallbackPasswords(userData, attempt);
+          attempts.push({
+            attemptNumber: attempt,
+            passwords: fallbackPasswords,
+            reasoning: 'AI suggested already-tried passwords, using fallback',
+          });
+          continue;
+        }
+
+        attempts.push({
+          attemptNumber: attempt,
+          passwords: newPasswords,
+          reasoning: aiResult.reasoning,
+        });
+
+        console.log(`\n💡 AI Reasoning:\n${aiResult.reasoning}`);
+        console.log(`\n🔑 Suggested Passwords (${newPasswords.length}):`);
+        newPasswords.forEach((p: string, i: number) => {
+          console.log(`   ${i + 1}. ${p}`);
+        });
+        console.log(`\n📊 Confidence: ${aiResult.confidence}%`);
+        if (aiResult.recommendedNext) {
+          console.log(`\n💭 Next Recommendation: ${aiResult.recommendedNext}`);
+        }
+
+      } catch (error) {
+        console.error(`❌ Error in attempt ${attempt}:`, error);
+
+        // Add fallback attempt on error
+        const fallbackPasswords = this.generateFallbackPasswords(userData, attempt);
+        attempts.push({
+          attemptNumber: attempt,
+          passwords: fallbackPasswords,
+          reasoning: `AI call failed: ${(error as Error).message}, using fallback strategy ${attempt}`,
+        });
+      }
+    }
+
+    console.log('\n' + '='.repeat(70));
+    console.log(`✅ Completed ${attempts.length} password guessing attempts`);
+    console.log('='.repeat(70));
+
+    // Collect all unique passwords across all attempts
+    const allPasswords = Array.from(
+      new Set(attempts.flatMap((a) => a.passwords))
+    );
+
+    console.log(`\n📊 Total Unique Passwords Generated: ${allPasswords.length}`);
+
+    const result: {
+      success: boolean;
+      passwords: string[];
+      attempts: Array<{
+        attemptNumber: number;
+        passwords: string[];
+        reasoning: string;
+      }>;
+      finalRecommendation?: string;
+    } = {
+      success: allPasswords.length > 0,
+      passwords: allPasswords,
+      attempts,
+    };
+
+    if (attempts.length === maxAttempts) {
+      result.finalRecommendation = 'All AI attempts exhausted. Consider: 1) Asking user for password, 2) Checking if PDF is actually password protected, 3) Verifying user data completeness, 4) Trying manual password entry';
+    }
+
+    return result;
+  }
+
+  /**
+   * Generate fallback passwords when AI fails
+   */
+  private generateFallbackPasswords(userData: any, attempt: number): string[] {
+    const passwords: string[] = [];
+
+    // Different strategies for each attempt
+    switch (attempt) {
+      case 1:
+        // First attempt: Standard DOB and account patterns
+        if (userData.date_of_birth) {
+          const dob = new Date(userData.date_of_birth);
+          const dd = String(dob.getDate()).padStart(2, '0');
+          const mm = String(dob.getMonth() + 1).padStart(2, '0');
+          const yyyy = String(dob.getFullYear());
+          const yy = yyyy.slice(-2);
+
+          passwords.push(
+            `${dd}${mm}${yyyy}`,
+            `${dd}${mm}${yy}`,
+            yyyy,
+            `${yyyy}${mm}${dd}`,
+            `${mm}${dd}${yyyy}`
+          );
+        }
+        if (userData.account_number) {
+          passwords.push(
+            String(userData.account_number),
+            String(userData.account_number).slice(-4)
+          );
+        }
+        if (userData.phone) {
+          const cleaned = userData.phone.replace(/\D/g, '');
+          passwords.push(
+            cleaned.slice(-10),
+            cleaned.slice(-4)
+          );
+        }
+        break;
+
+      case 2:
+        // Second attempt: Name combinations with DOB/Account
+        if (userData.name) {
+          const name4Lower = userData.name.substring(0, 4).toLowerCase();
+          const name4Upper = userData.name.substring(0, 4).toUpperCase();
+          const name4Title = name4Lower.charAt(0).toUpperCase() + name4Lower.slice(1);
+
+          if (userData.date_of_birth) {
+            const dob = new Date(userData.date_of_birth);
+            const dd = String(dob.getDate()).padStart(2, '0');
+            const mm = String(dob.getMonth() + 1).padStart(2, '0');
+
+            passwords.push(
+              `${name4Lower}${dd}${mm}`,
+              `${name4Upper}${dd}${mm}`,
+              `${name4Title}${dd}${mm}`,
+              `${name4Lower}${mm}${dd}`,
+              `${name4Upper}${mm}${dd}`
+            );
+          }
+
+          if (userData.account_number) {
+            const last4 = String(userData.account_number).slice(-4);
+            passwords.push(
+              `${name4Lower}${last4}`,
+              `${name4Upper}${last4}`,
+              `${name4Title}${last4}`
+            );
+          }
+        }
+
+        if (userData.pan_number) {
+          passwords.push(
+            userData.pan_number.toUpperCase(),
+            userData.pan_number.toLowerCase()
+          );
+        }
+
+        if (userData.customer_id || userData.crn_number) {
+          passwords.push(
+            String(userData.customer_id || userData.crn_number)
+          );
+        }
+        break;
+
+      case 3:
+        // Third attempt: Special characters, reverse patterns, and defaults
+        if (userData.date_of_birth) {
+          const dob = new Date(userData.date_of_birth);
+          const dd = String(dob.getDate()).padStart(2, '0');
+          const mm = String(dob.getMonth() + 1).padStart(2, '0');
+          const yyyy = String(dob.getFullYear());
+          const yy = yyyy.slice(-2);
+
+          passwords.push(
+            `${dd}-${mm}-${yyyy}`,
+            `${dd}/${mm}/${yyyy}`,
+            `${yyyy}-${mm}-${dd}`,
+            `${dd}.${mm}.${yyyy}`,
+            `${yy}${mm}${dd}`,
+            `${mm}${yy}`
+          );
+        }
+
+        // Policy/Folio numbers
+        if (userData.policy_number) {
+          passwords.push(String(userData.policy_number));
+        }
+        if (userData.folio_number) {
+          passwords.push(String(userData.folio_number));
+        }
+
+        // IFSC code
+        if (userData.ifsc_code) {
+          passwords.push(
+            userData.ifsc_code.toUpperCase(),
+            userData.ifsc_code.toLowerCase()
+          );
+        }
+
+        // Aadhar (last 4 digits)
+        if (userData.aadhar_number) {
+          passwords.push(
+            String(userData.aadhar_number).replace(/\D/g, '').slice(-4)
+          );
+        }
+
+        // Common defaults
+        passwords.push(
+          '',
+          'password',
+          'Password',
+          '123456',
+          '12345678',
+          '0000',
+          '1111',
+          '1234'
+        );
+        break;
+    }
+
+    // Remove empty/null/undefined and return unique
+    return Array.from(new Set(passwords.filter(Boolean)));
   }
 
 
@@ -594,16 +1169,19 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
       // Fetch user profile from database
       const user = await prisma.user.findUnique({
         where: { id: userId },
-        select: {
-          name: true,
-          phone: true,
-          email: true,
-          address: true,
-          pan_number: true,
-          aadhar_number: true,
-          date_of_birth: true,
-          crn_number: true,
-        },
+        // select: {
+        //   name: true,
+        //   phone: true,
+        //   email: true,
+        //   address: true,
+        //   pan_number: true,
+        //   aadhar_number: true,
+        //   date_of_birth: true,
+        //   crn_number: true,
+        //   account_number: true,  // ✅ Correct: snake_case
+        //   pran_number:true,
+
+        // },
       });
 
       if (!user) {
@@ -619,10 +1197,11 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
         phone: 'phone',
         email: 'email',
         address: 'address',
-        pan_number: 'pan_number',
-        aadhar_number: 'aadhar_number',
-        date_of_birth: 'date_of_birth',
-        crn_number: 'crn_number',
+        'pan_number': 'pan_number',
+        'aadhar_number': 'aadhar_number',
+        'date_of_birth': 'date_of_birth',
+        'crn_number': 'crn_number',
+        'account_number': 'account_number',
       };
 
       // Check each required field
@@ -695,6 +1274,8 @@ Only return indices of emails with MAJOR financial data. Return empty array [] i
     try {
       const prompt = `You are an expert financial document analyzer. Analyze this email and extract all financial information with proper categorization.
 
+⚠️ CRITICAL INSTRUCTION: Extract and return EXACT VALUES from the document. DO NOT mask, hide, or replace any numbers with XXX or asterisks. Return COMPLETE account numbers, amounts, and all other financial details EXACTLY as they appear in the document.
+
 Subject: ${data.subject}
 From: ${data.sender}
 Content: ${data.emailContent}
@@ -753,14 +1334,24 @@ CLASSIFICATION RULES:
 - missing: Information incomplete
 
 🔍 EXTRACT ALL FIELDS AND RETURN JSON:
+
+⚠️ IMPORTANT: Return EXACT VALUES from the document:
+- accountNumber: Return FULL account number as-is (e.g., "1234567890123456", NOT "XXXX-XXXX-XXXX-1234")
+- amount: Return EXACT amount (e.g., 15000.50, NOT "XXXX")
+- policyNumber: Return FULL policy number as-is
+- folioNumber: Return FULL folio number as-is
+- bankName: Return FULL bank name
+- ifscCode: Return FULL IFSC code
+- ALL OTHER FIELDS: Return EXACT values from the document without any masking or hiding
+
 {
   "transactionType": "invoice|payment|receipt|statement|bill|tax|credit_card|other",
-  "amount": number or null,
+  "amount": number or null (EXACT amount from document, no masking),
   "currency": "USD|INR|EUR|GBP|etc",
-  "merchant": "company/bank/institution name",
+  "merchant": "company/bank/institution name (FULL name, no abbreviations)",
   "description": "detailed description of transaction",
   "date": "YYYY-MM-DD",
-  "accountNumber": "account/reference number",
+  "accountNumber": "FULL account/reference number (NO masking, return complete number)",
   "confidence": 0-100,
   
   "assetCategory": "asset|liability|insurance",
@@ -824,7 +1415,7 @@ Example 1 - Credit Card Bill:
   "merchant": "HDFC Bank",
   "description": "Credit card statement for September 2025",
   "date": "2025-09-28",
-  "accountNumber": "XXXX-XXXX-XXXX-1234",
+  "accountNumber": "4532123456789012",
   "confidence": 95,
   "assetCategory": "liability",
   "assetType": "credit_card",
@@ -840,9 +1431,11 @@ Example 1 - Credit Card Bill:
     "dueDate": "2025-10-15"
   },
   "keyPoints": [
+    "Account Number: 4532123456789012",
     "Outstanding balance: ₹15,000",
     "Minimum payment due: ₹750",
-    "Payment due by: Oct 15, 2025"
+    "Payment due by: Oct 15, 2025",
+    "Credit limit: ₹100,000"
   ]
 }
 
@@ -957,6 +1550,7 @@ Example 4 - Home Loan EMI:
 }
 
 IMPORTANT: In "requiredUserFields", identify which personal/account fields are REQUIRED or MENTIONED in the email/attachments. Set to true if the field is required/requested, false otherwise. Example: If email asks for CRN number, set "crn_number": true.
+ALL DATE in the form YYYY-MM-DD
 
 Now analyze the provided email and return structured JSON:`;
 
@@ -1042,7 +1636,7 @@ Now analyze the provided email and return structured JSON:`;
         attachmentAnalyses,
         issues,
         required_fields: requiredFields,
-        extracted_content:extracted
+        extracted_content: extracted
       };
     } catch (error) {
       console.error('Error analyzing financial email:', error);
@@ -1560,7 +2154,8 @@ If NO issues found, return: {"issues": []}
       asset: '💰',
       liability: '💳',
       insurance: '🛡️',
-    }[data.assetCategory] || '📄';
+      other: '📄',
+    }[data.assetCategory];
 
     const statusEmoji = {
       active: '✅',
@@ -1667,6 +2262,270 @@ If NO issues found, return: {"issues": []}
       summary: `Identified ${transactionType} with ${confidence}% confidence`,
     } as any;
   }
+
+
+  /**
+ * Analyze file content and return Asset-ready structured data
+ */
+  async analyzeFileForAsset(
+    extractedText: string,
+    metadata: Record<string, any>,
+    userId: string,
+    fileName?: string,
+    mimeType?: string
+  ): Promise<{
+    success: boolean;
+    assetData: Partial<Asset>;
+    issues: string[];
+    required_fields: string[];
+  }> {
+    try {
+      const systemPrompt = `You are an expert financial document analyzer. Extract ALL information from documents and map them to structured asset/liability/insurance data.`;
+
+      const prompt = `Analyze this financial document and extract ALL details for asset tracking:
+
+═══════════════════════════════════════════════════════════
+DOCUMENT INFORMATION
+═══════════════════════════════════════════════════════════
+File Name: ${fileName || 'Unknown'}
+MIME Type: ${mimeType || 'Unknown'}
+Extraction Metadata: ${JSON.stringify(metadata)}
+
+═══════════════════════════════════════════════════════════
+DOCUMENT CONTENT
+═══════════════════════════════════════════════════════════
+${extractedText}
+
+═══════════════════════════════════════════════════════════
+EXTRACTION REQUIREMENTS
+═══════════════════════════════════════════════════════════
+
+Map this document to the following structure:
+
+{
+  // Basic identification
+  "name": "Asset name/title",
+  "type": "asset|liability|insurance",
+  "sub_type": "Specific type (e.g., savings_account, mutual_fund, home_loan, life_insurance)",
+  
+  // Bank/Financial details
+  "account_number": "Full account number",
+  "ifsc_code": "IFSC code (Indian banks)",
+  "branch_name": "Branch name",
+  "bank_name": "Bank/Institution name",
+  
+  // Financial values
+  "balance": "Current balance/value (Decimal)",
+  "total_value": "Total investment/loan amount (Decimal)",
+  
+  // Status & tracking
+  "status": "active|inactive|complete|missing",
+  
+  // Address
+  "address": "Complete address of institution/property",
+  
+  // CRN/Customer Reference
+  "crn_number": "CRN or customer reference number",
+  
+  // Nominee details (JSON array)
+  "nominee": [
+    {
+      "name": "Nominee name",
+      "relation": "Relationship",
+      "percentage": "Share percentage"
+    }
+  ],
+  
+  // Insurance specific
+  "policy_number": "Policy number",
+  "fund_name": "Fund/scheme name",
+  "folio_number": "Folio number for MF/insurance",
+  
+  // Document metadata (store AI analysis)
+  "document_metadata": {
+    "extraction_method": "python_extractor|ocr|pypdf",
+    "confidence": 0-100,
+    "document_type": "statement|policy|invoice|receipt",
+    "extracted_at": "ISO timestamp",
+    "page_count": "Number of pages",
+    "has_tables": true/false,
+    "key_findings": ["Finding 1", "Finding 2"],
+    "financial_summary": {
+      "total_credits": "Total credit amount",
+      "total_debits": "Total debit amount",
+      "net_balance": "Net balance",
+      "transaction_count": "Number of transactions",
+      "date_range": "Statement period"
+    }
+  },
+  
+  // File details
+  "file_name": "Original filename",
+  "file_size": "File size in bytes",
+  "mime_type": "MIME type",
+  
+  // Required fields that user needs to provide
+  "required_fields": [
+    "List of fields that are missing or need user confirmation"
+  ],
+  
+  // Issues detected
+  "issues": [
+    "List of validation issues or data quality concerns"
+  ]
+}
+
+═══════════════════════════════════════════════════════════
+CLASSIFICATION RULES
+═══════════════════════════════════════════════════════════
+
+**ASSET TYPES:**
+- savings_account, checking_account, fixed_deposit
+- mutual_fund, stocks, bonds, sip, ppf, nps
+- real_estate, property, land
+- vehicle, gold, cryptocurrency
+- business_ownership
+
+**LIABILITY TYPES:**
+- home_loan, vehicle_loan, personal_loan
+- credit_card, education_loan
+- utility_bill, tax_liability, emi
+
+**INSURANCE TYPES:**
+- life_insurance, health_insurance
+- vehicle_insurance, home_insurance
+- critical_illness, accident_insurance
+
+═══════════════════════════════════════════════════════════
+IMPORTANT INSTRUCTIONS
+═══════════════════════════════════════════════════════════
+
+1. Extract ALL account numbers, IFSC codes, policy numbers
+2. Identify nominee details if mentioned
+3. Calculate balance and total_value accurately
+4. Detect document quality issues
+5. List missing required fields
+6. Return ONLY valid JSON, no additional text
+7. Use null for missing fields
+8. Convert dates to ISO format
+9. Store complete financial metadata
+
+Begin extraction now:`;
+
+      const response = await this.callBedrock(prompt, systemPrompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) {
+        throw new Error('Failed to parse AI response');
+      }
+
+      const extracted = JSON.parse(jsonMatch[0]);
+
+      // Validate extracted data
+      const issues = await this.validateAssetData(extracted, userId);
+      const requiredFields = await this.checkMissingUserFields(
+        userId,
+        extracted.required_fields || {}
+      );
+
+      return {
+        success: true,
+        assetData: {
+          user_id: userId,
+          name: extracted.name,
+          type: extracted.type || 'documents',
+          sub_type: extracted.sub_type,
+          account_number: extracted.account_number,
+          ifsc_code: extracted.ifsc_code,
+          branch_name: extracted.branch_name,
+          bank_name: extracted.bank_name,
+          // balance: extracted.balance ? parseFloat(extracted.balance) : 0,
+          // total_value: extracted.total_value ? parseFloat(extracted.total_value) : 0,
+          // status: extracted.status || 'incai',
+          file_content: extractedText,
+          address: extracted.address,
+          crn_number: extracted.crn_number,
+          nominee: extracted.nominee || [],
+          policy_number: extracted.policy_number,
+          fund_name: extracted.fund_name,
+          folio_number: extracted.folio_number,
+          document_metadata: {
+            ...extracted.document_metadata,
+            extraction_method: metadata.method || metadata.extraction_method,
+            extracted_at: new Date().toISOString(),
+            original_metadata: metadata
+          },
+          file_name: fileName!,
+          file_size: parseInt(metadata.file_size),
+          mime_type: mimeType as string,
+          issues: issues,
+          required_fields: requiredFields
+        },
+        issues,
+        required_fields: requiredFields
+      };
+
+    } catch (error) {
+      console.error('❌ Error analyzing file for asset:', error);
+      return {
+        success: false,
+        assetData: {},
+        issues: [(error as Error).message],
+        required_fields: []
+      };
+    }
+  }
+
+  /**
+   * Validate asset data before storing
+   */
+  private async validateAssetData(
+    extracted: any,
+    userId: string
+  ): Promise<string[]> {
+    const issues: string[] = [];
+
+    // Type validation
+    const validTypes = ['asset', 'liability', 'insurance'];
+    if (!extracted.type || !validTypes.includes(extracted.type)) {
+      issues.push('Invalid or missing asset type');
+    }
+
+    // Bank details validation
+    if (extracted.account_number) {
+      const digitsOnly = extracted.account_number.replace(/[^0-9]/g, '');
+      if (!/^\d{9,18}$/.test(digitsOnly)) {
+        issues.push('Invalid account number format');
+      }
+    }
+
+    if (extracted.ifsc_code) {
+      if (!/^[A-Z]{4}0[A-Z0-9]{6}$/.test(extracted.ifsc_code.toUpperCase())) {
+        issues.push('Invalid IFSC code format');
+      }
+    }
+
+    // Financial values validation
+    if (extracted.balance && parseFloat(extracted.balance) < 0) {
+      issues.push('Negative balance detected');
+    }
+
+    if (extracted.total_value && parseFloat(extracted.total_value) < 0) {
+      issues.push('Negative total value detected');
+    }
+
+    // Required fields check
+    if (!extracted.name) {
+      issues.push('Asset name is required');
+    }
+
+    if (!extracted.bank_name && !extracted.merchant) {
+      issues.push('Bank/Institution name is required');
+    }
+
+    return issues;
+  }
+
 
   /**
    * Analyze PDF document and extract structured data
@@ -1905,13 +2764,13 @@ Begin analysis now:`;
       // Fetch user details from database
       const userDetails = await prisma.user.findUnique({
         where: { id: userId },
-        select: {
-          name: true,
-          email: true,
-          phone: true,
-          date_of_birth: true,
-          pan_number: true,
-        },
+        // select: {
+        //   name: true,
+        //   email: true,
+        //   phone: true,
+        //   date_of_birth: true,
+        //   pan_number: true,
+        // },
       });
 
       if (!userDetails) {
@@ -1967,6 +2826,7 @@ Instructions:
 2. If instructions found AND user details provided, generate the password exactly as instructed
 3. Return ONLY the password string, nothing else
 4. If no instructions found OR user details missing, return exactly "false"
+5. Default format DDMMYYYY
 
 Response (just password or "false"):`;
 
@@ -2175,4 +3035,799 @@ Response (just password or "false"):`;
 
     return codes[symbol.toLowerCase()] || 'USD';
   }
+
+  /**
+   * 🔥 NEW METHOD: Extract balance and total_value from document_metadata
+   * Analyzes document_metadata using AI to find exact balance values
+   * 
+   * @param documentMetadata - Complete document metadata object
+   * @param assetCategory - Asset category (asset, liability, insurance)
+   * @returns Object with balance and total_value
+   * 
+   * @example
+   * const aiService = new AIService();
+   * const result = await aiService.extractBalanceFromMetadata(
+   *   asset.document_metadata,
+   *   'liability'
+   * );
+   * console.log(`Balance: ₹${result.balance}, Total: ₹${result.total_value}`);
+   */
+  async extractBalanceFromMetadata(
+    documentMetadata: any,
+    assetCategory: string
+  ): Promise<{
+    balance: number | null;
+    total_value: number | null;
+    confidence: number;
+    reasoning: string;
+  }> {
+    try {
+      console.log('\n🔍 Extracting balance from document metadata...');
+
+      const prompt = `You are an expert financial data analyzer. Analyze this document metadata and extract the EXACT balance and total value.
+
+═══════════════════════════════════════════════════════════
+DOCUMENT METADATA
+═══════════════════════════════════════════════════════════
+${JSON.stringify(documentMetadata, null, 2)}
+
+═══════════════════════════════════════════════════════════
+ASSET CATEGORY: ${assetCategory}
+═══════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════
+EXTRACTION RULES BY CATEGORY
+═══════════════════════════════════════════════════════════
+
+🏦 ASSET (savings, investments, property):
+   balance: Current account balance or investment value
+   total_value: Total investment amount or property value
+   
+   Sources to check:
+   - aiAnalysis.balance
+   - financialMetadata.currentValue
+   - financialMetadata.totalValue
+   - attachmentAnalysis.content.financialFigures.closingBalance
+   - attachmentAnalysis.content.financialFigures.openingBalance
+   - Any "balance", "current value", "market value" mentions
+   - For investments: NAV × Units = current value
+
+💳 LIABILITY (loans, credit cards, bills):
+   balance: Outstanding balance or amount due
+   total_value: Total loan amount or credit limit
+   
+   Sources to check:
+   - financialMetadata.outstandingBalance
+   - financialMetadata.creditLimit
+   - financialMetadata.emiAmount (NOT balance, just EMI)
+   - attachmentAnalysis.content.financialFigures.totalDue
+   - attachmentAnalysis.content.financialFigures.outstandingBalance
+   - attachmentAnalysis.content.financialFigures.creditLimit
+   - aiAnalysis.total_value
+   - Any "outstanding", "due amount", "total due" mentions
+
+🛡️ INSURANCE (policies):
+   balance: Premium amount (annual/monthly)
+   total_value: Sum assured or coverage amount
+   
+   Sources to check:
+   - financialMetadata.premium
+   - financialMetadata.sumAssured
+   - financialMetadata.coverageAmount
+   - attachmentAnalysis.content.financialFigures (any premium/coverage)
+   - Any "premium", "sum assured", "coverage" mentions
+
+═══════════════════════════════════════════════════════════
+IMPORTANT INSTRUCTIONS
+═══════════════════════════════════════════════════════════
+
+1. **Return EXACT NUMERIC VALUES ONLY** (no currency symbols, commas, or text)
+2. Look in ALL possible fields:
+   - aiAnalysis object
+   - financialMetadata object
+   - attachmentAnalysis.content.financialFigures
+   - keyFindings array (extract numbers from text)
+   - description field
+3. For credit cards: outstandingBalance = balance, creditLimit = total_value
+4. For loans: outstandingBalance = balance, loan amount = total_value
+5. For insurance: premium = balance, sum assured = total_value
+6. For investments: current value = balance, invested amount = total_value
+7. If multiple sources exist, prefer:
+   - attachmentAnalysis (highest priority - actual document data)
+   - aiAnalysis (second priority)
+   - financialMetadata (third priority)
+8. Convert strings to numbers (remove ₹, $, commas, etc.)
+9. Return null if genuinely not found (don't guess)
+10. Check keyFindings for phrases like "outstanding balance: ₹12,540"
+
+═══════════════════════════════════════════════════════════
+RESPONSE FORMAT (JSON ONLY)
+═══════════════════════════════════════════════════════════
+
+Return ONLY valid JSON:
+
+{
+  "balance": <number or null>,
+  "total_value": <number or null>,
+  "confidence": <0-100>,
+  "reasoning": "Explain where you found the values and why",
+  "sources": {
+    "balance_source": "Exact path where balance was found (e.g., 'attachmentAnalysis.content.financialFigures.totalDue')",
+    "total_value_source": "Exact path where total_value was found"
+  }
+}
+
+Examples:
+
+Credit Card:
+{
+  "balance": 12540,
+  "total_value": 120000,
+  "confidence": 95,
+  "reasoning": "Found outstanding due of ₹12,540 in attachmentAnalysis.content.financialFigures.totalDue and credit limit of ₹1,20,000 in attachmentAnalysis.content.financialFigures.creditLimit",
+  "sources": {
+    "balance_source": "attachmentAnalysis.content.financialFigures.totalDue",
+    "total_value_source": "attachmentAnalysis.content.financialFigures.creditLimit"
+  }
+}
+
+Mutual Fund:
+{
+  "balance": 250000,
+  "total_value": 200000,
+  "confidence": 90,
+  "reasoning": "Current investment value (NAV × Units) is ₹2,50,000 and invested amount is ₹2,00,000",
+  "sources": {
+    "balance_source": "financialMetadata.currentValue",
+    "total_value_source": "financialMetadata.totalValue"
+  }
+}
+
+Begin extraction now:`;
+
+      const response = await this.callBedrock(prompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) {
+        console.warn('⚠️ Failed to extract balance from metadata');
+        return {
+          balance: null,
+          total_value: null,
+          confidence: 0,
+          reasoning: 'AI failed to extract balance'
+        };
+      }
+
+      const result = JSON.parse(jsonMatch[0]);
+
+      console.log(`✅ Balance extraction result:`);
+      console.log(`   Balance: ${result.balance !== null ? `₹${result.balance}` : 'null'}`);
+      console.log(`   Total Value: ${result.total_value !== null ? `₹${result.total_value}` : 'null'}`);
+      console.log(`   Confidence: ${result.confidence}%`);
+      console.log(`   Reasoning: ${result.reasoning}`);
+
+      return {
+        balance: result.balance !== null ? Number(result.balance) : null,
+        total_value: result.total_value !== null ? Number(result.total_value) : null,
+        confidence: result.confidence || 50,
+        reasoning: result.reasoning || 'Balance extracted from metadata'
+      };
+
+    } catch (error) {
+      console.error('❌ Error extracting balance from metadata:', error);
+      return {
+        balance: null,
+        total_value: null,
+        confidence: 0,
+        reasoning: `Error: ${(error as Error).message}`
+      };
+    }
+  }
+
+  /**
+   * ✅ NEW METHOD: Verify if the extracted content is actually financial data
+   * Returns true if it's valid financial data, false if it's garbage/non-financial
+   */
+  async verifyFinancialContent(
+    extractedData: EnhancedFinancialData,
+    fileContent: string,
+    fileName: string
+  ): Promise<{
+    isFinancial: boolean;
+    confidence: number;
+    reason: string;
+    recommendations?: string[];
+  }> {
+    try {
+      console.log(`\n🔍 Verifying financial content for: ${fileName}`);
+
+      // Quick pre-checks before AI verification
+      const preCheckResult = this.preCheckFinancialContent(extractedData, fileContent, fileName);
+
+      if (!preCheckResult.shouldVerifyWithAI) {
+        console.log(`❌ Pre-check failed: ${preCheckResult.reason}`);
+        return {
+          isFinancial: false,
+          confidence: preCheckResult.confidence,
+          reason: preCheckResult.reason,
+          recommendations: preCheckResult.recommendations!
+        };
+      }
+
+      // AI-powered deep verification
+      const prompt = `You are an expert financial document classifier. Your task is to verify if the provided content is ACTUALLY financial data or just garbage/non-financial content.
+
+FILE INFORMATION:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Filename: ${fileName}
+Extracted Data Confidence: ${extractedData.confidence}%
+Asset Category: ${extractedData.assetCategory || 'Not detected'}
+Asset Type: ${extractedData.assetType || 'Not detected'}
+Merchant/Bank: ${extractedData.merchant || 'Not detected'}
+Amount: ${extractedData.amount || 'Not detected'}
+
+EXTRACTED DATA:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${JSON.stringify(extractedData, null, 2)}
+
+FILE CONTENT PREVIEW (first 2000 chars):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${fileContent.substring(0, 2000)}
+
+VERIFICATION CRITERIA:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ VALID FINANCIAL DATA should contain:
+1. Clear financial institution/bank names (HDFC, SBI, ICICI, LIC, etc.)
+2. Actual monetary amounts with currency symbols (₹, $, etc.)
+3. Financial terms (statement, invoice, payment, account, balance, etc.)
+4. Account numbers, policy numbers, folio numbers, transaction IDs
+5. Dates related to financial transactions
+6. Financial metadata (interest rates, EMI, premium, coverage, etc.)
+7. Clear document structure (headers, tables, organized data)
+8. Professional banking/financial language
+9. Regulatory information (IFSC, PAN, terms & conditions)
+10. Transaction history or financial summaries
+
+❌ NON-FINANCIAL/GARBAGE DATA indicators:
+1. Error messages (password protected, extraction failed, corrupt file)
+2. System logs or debug output
+3. Dependency checks or software installation logs
+4. Generic placeholder text ("Placeholder financial detail", "Line item 1", etc.)
+5. Testing/demo data with no real financial content
+6. Marketing emails without actual transaction data
+7. Empty or minimal content (<100 meaningful characters)
+8. Excessive binary/unreadable characters
+9. File format conversion errors
+10. OCR failures or gibberish text
+11. Technical error messages (PyMuPDF, pypdf, pdfplumber errors)
+12. "DEPENDENCY CHECK", "Available", "Successful" without context
+13. Repeated generic phrases without real data
+14. Email invitations, notifications, or promotional content
+15. Family sharing invitations or platform notifications
+16. Google account security alerts
+17. Verification codes, OTPs, login alerts
+
+EXAMPLES OF NON-FINANCIAL CONTENT:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+- "PyMuPDF: ✓ Available, pypdf: ✓ Available" → Software dependency check
+- "Password protected, extraction failed" → Error message
+- "Line item 1: Placeholder financial detail" → Generic placeholder
+- "Invited you to join the family group" → Family invitation
+- "Google Account security alert" → Platform notification
+- "Dependency check successful" → System log
+
+YOUR TASK:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Analyze the content and determine:
+1. Is this ACTUAL financial data worth saving?
+2. Or is it garbage/error/non-financial content?
+
+Return ONLY valid JSON in this format:
+{
+  "isFinancial": true or false,
+  "confidence": 0-100 (how confident you are in this classification),
+  "reason": "Clear explanation of why this is/isn't financial data",
+  "financialIndicators": [
+    "List of financial elements found (or empty if none)"
+  ],
+  "nonFinancialIndicators": [
+    "List of non-financial/error elements found (or empty if none)"
+  ],
+  "recommendations": [
+    "What should be done with this data"
+  ]
+}
+
+IMPORTANT:
+- Be STRICT: If you're not 90%+ confident it's real financial data, mark it as non-financial
+- Prefer false negatives (rejecting questionable data) over false positives (saving garbage)
+- Real financial documents have SPECIFIC details, not generic placeholders
+- Error messages, logs, and system output are NOT financial data
+- If confidence in extracted data is below 60%, be extra skeptical
+
+Analyze now:`;
+
+      const response = await this.callBedrock(prompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) {
+        console.warn('⚠️ AI verification failed to return JSON, using fallback');
+        return {
+          isFinancial: extractedData.confidence > 70,
+          confidence: extractedData.confidence,
+          reason: 'AI verification inconclusive, relying on extraction confidence',
+          recommendations: ['Manual review recommended']
+        };
+      }
+
+      const verificationResult = JSON.parse(jsonMatch[0]);
+
+      console.log(`\n📊 Verification Result:`);
+      console.log(`   Financial: ${verificationResult.isFinancial ? '✅ YES' : '❌ NO'}`);
+      console.log(`   Confidence: ${verificationResult.confidence}%`);
+      console.log(`   Reason: ${verificationResult.reason}`);
+
+      if (verificationResult.financialIndicators && verificationResult.financialIndicators.length > 0) {
+        console.log(`   ✅ Financial Indicators: ${verificationResult.financialIndicators.length}`);
+      }
+
+      if (verificationResult.nonFinancialIndicators && verificationResult.nonFinancialIndicators.length > 0) {
+        console.log(`   ❌ Non-Financial Indicators: ${verificationResult.nonFinancialIndicators.length}`);
+      }
+
+      return {
+        isFinancial: verificationResult.isFinancial,
+        confidence: verificationResult.confidence,
+        reason: verificationResult.reason,
+        recommendations: verificationResult.recommendations || []
+      };
+
+    } catch (error) {
+      console.error('❌ Error verifying financial content:', error);
+
+      // Fallback to confidence-based decision on error
+      const isFinancial = extractedData.confidence > 70;
+      return {
+        isFinancial,
+        confidence: extractedData.confidence,
+        reason: `Verification error: ${(error as Error).message}. Fallback based on extraction confidence.`,
+        recommendations: ['Manual review required due to verification error']
+      };
+    }
+  }
+
+  /**
+   * Pre-check financial content before AI verification
+   * Quick checks to filter out obvious non-financial data
+   */
+  private preCheckFinancialContent(
+    extractedData: EnhancedFinancialData,
+    fileContent: string,
+    fileName: string
+  ): {
+    shouldVerifyWithAI: boolean;
+    confidence: number;
+    reason: string;
+    recommendations?: string[];
+  } {
+    const contentLower = fileContent.toLowerCase();
+
+    // Check 1: Too short content
+    // if (fileContent.length < 10) {
+    //   return {
+    //     shouldVerifyWithAI: false,
+    //     confidence: 0,
+    //     reason: 'Content too short (< 100 characters) - likely extraction failure',
+    //     recommendations: ['Check if file is corrupt or password protected']
+    //   };
+    // }
+
+    // Check 2: Error indicators
+    const errorPatterns = [
+      'dependency check',
+      'extraction failed',
+      'password protected',
+      'incorrect password',
+      'pypdf',
+      'pdfplumber',
+      'pymupdf',
+      '✓ available',
+      '✗ extraction failed',
+      'corrupt',
+      'damaged',
+      'parsing error'
+    ];
+
+    let errorCount = 0;
+    for (const pattern of errorPatterns) {
+      if (contentLower.includes(pattern)) {
+        errorCount++;
+      }
+    }
+
+    if (errorCount >= 3) {
+      return {
+        shouldVerifyWithAI: false,
+        confidence: 0,
+        reason: 'Multiple error indicators found - this is system output, not financial data',
+        recommendations: ['Re-extract the file or check file integrity']
+      };
+    }
+
+    // Check 3: Placeholder content
+    const placeholderPatterns = [
+      'placeholder',
+      'line item 1',
+      'line item 2',
+      'additional narrative text',
+      'note 1:',
+      'note 2:'
+    ];
+
+    let placeholderCount = 0;
+    for (const pattern of placeholderPatterns) {
+      if (contentLower.includes(pattern)) {
+        placeholderCount++;
+      }
+    }
+
+    if (placeholderCount >= 3) {
+      return {
+        shouldVerifyWithAI: false,
+        confidence: 0,
+        reason: 'Generic placeholder content detected - not real financial data',
+        recommendations: ['This appears to be test/demo data']
+      };
+    }
+
+    // Check 4: Non-financial content (invitations, notifications)
+    const nonFinancialPatterns = [
+      'invited you to join',
+      'family group',
+      'family invitation',
+      'google account',
+      'security alert',
+      'verify your',
+      'confirm your email',
+      'password reset',
+      'login alert',
+      'app password created'
+    ];
+
+    for (const pattern of nonFinancialPatterns) {
+      if (contentLower.includes(pattern)) {
+        return {
+          shouldVerifyWithAI: false,
+          confidence: 0,
+          reason: `Non-financial content detected: ${pattern}`,
+          recommendations: ['This is a notification/invitation, not financial data']
+        };
+      }
+    }
+
+    // Check 5: Very low extraction confidence
+    if (extractedData.confidence < 30) {
+      return {
+        shouldVerifyWithAI: false,
+        confidence: extractedData.confidence,
+        reason: 'Extraction confidence too low (< 30%) - unreliable data',
+        recommendations: ['Data quality too poor for reliable analysis']
+      };
+    }
+
+    // Check 6: Missing critical financial elements
+    const hasMerchant = extractedData.merchant && extractedData.merchant.length > 2;
+    const hasCategory = extractedData.assetCategory && extractedData.assetCategory !== 'other';
+    const hasAmount = extractedData.amount ||
+      extractedData.financialMetadata?.currentValue ||
+      extractedData.financialMetadata?.totalValue;
+
+    const criticalElementsCount = [hasMerchant, hasCategory, hasAmount].filter(Boolean).length;
+
+    if (criticalElementsCount === 0) {
+      return {
+        shouldVerifyWithAI: true, // Still verify with AI as it might need deeper analysis
+        confidence: 30,
+        reason: 'No critical financial elements detected in quick check',
+        recommendations: ['Needs AI verification to confirm']
+      };
+    }
+
+    // Passed all pre-checks, proceed to AI verification
+    return {
+      shouldVerifyWithAI: true,
+      confidence: 50,
+      reason: 'Passed pre-checks, proceeding to AI verification'
+    };
+  }
+
+  /**
+ * 🔥 NEW METHOD: Analyze Non-Financial Document Content
+ * Dedicated method for general documents (not financial assets)
+ * Maps to Document model schema
+ * 
+ * @param extractedText - Text extracted from document
+ * @param metadata - Extraction metadata
+ * @param userId - User ID
+ * @param filename - Original filename
+ * @param mimeType - MIME type
+ * @returns Document-ready structured data
+ */
+  async analyzeDocumentContent(
+    extractedText: string,
+    metadata: any,
+    userId: string,
+    filename: string,
+    mimeType: string
+  ): Promise<{
+    success: boolean;
+    documentData: {
+      user_id: string;
+      filename: string;
+      original_filename: string;
+      file_size: number;
+      mime_type: string;
+      upload_source: string;
+      parsing_status: 'completed' | 'failed';
+      parsing_error?: string;
+      extracted_text: string;
+      document_type: 'general' | 'contract' | 'agreement' | 'certificate' | 'license' | 'invoice' | 'receipt' | 'statement' | 'report' | 'letter' | 'form' | 'manual' | 'presentation' | 'spreadsheet' | 'other';
+      document_category: string;
+      confidence_score: number;
+      extracted_data: Record<string, any>;
+      page_count?: number;
+      is_password_protected: boolean;
+      processing_method: string;
+      processing_duration?: number;
+      ai_model_used: string;
+      data_quality_score: number;
+      validation_errors?: any;
+    };
+  }> {
+    try {
+      console.log('\n📄 Analyzing non-financial document...');
+      console.log(`   File: ${filename}`);
+      console.log(`   Text Length: ${extractedText.length} chars`);
+
+      const systemPrompt = `You are an expert document classifier and content analyzer. Analyze documents and extract structured information for categorization and storage.`;
+
+      const prompt = `Analyze this document and extract structured metadata:
+
+═══════════════════════════════════════════════════════════
+DOCUMENT INFORMATION
+═══════════════════════════════════════════════════════════
+Filename: ${filename}
+MIME Type: ${mimeType}
+Extraction Metadata: ${JSON.stringify(metadata)}
+
+═══════════════════════════════════════════════════════════
+DOCUMENT CONTENT (First 5000 chars)
+═══════════════════════════════════════════════════════════
+${extractedText.substring(0, 5000)}
+
+═══════════════════════════════════════════════════════════
+ANALYSIS REQUIREMENTS
+═══════════════════════════════════════════════════════════
+
+1. DOCUMENT CLASSIFICATION
+   Classify this document into ONE of these types:
+   - general: General documents, notes, letters
+   - contract: Legal contracts, agreements with terms
+   - agreement: Informal agreements, MOUs
+   - certificate: Certificates, awards, credentials
+   - license: Licenses, permits, authorizations
+   - invoice: Commercial invoices (non-financial tracking)
+   - receipt: Purchase receipts, acknowledgments
+   - statement: Various statements (not bank statements)
+   - report: Research reports, project reports
+   - letter: Formal/informal letters, correspondence
+   - form: Application forms, registration forms
+   - manual: User manuals, guides, instructions
+   - presentation: Presentation documents, slides
+   - spreadsheet: Data tables, spreadsheets
+   - other: Doesn't fit above categories
+
+2. DOCUMENT CATEGORY
+   Provide a specific subcategory, examples:
+   - For contract: "Employment Contract", "Service Agreement"
+   - For certificate: "Degree Certificate", "Participation Certificate"
+   - For report: "Annual Report", "Project Status Report"
+   - For letter: "Resignation Letter", "Recommendation Letter"
+
+3. CONTENT EXTRACTION
+   Extract key structured data:
+   {
+     "title": "Document title or subject",
+     "author": "Author/creator name",
+     "organization": "Issuing organization",
+     "date": "Document date (YYYY-MM-DD format)",
+     "reference_number": "Any reference/registration number",
+     "parties_involved": ["List of parties/people mentioned"],
+     "key_terms": ["Important terms or topics"],
+     "summary": "Brief 2-3 sentence summary",
+     "important_dates": [
+       {"date": "YYYY-MM-DD", "description": "Event description"}
+     ],
+     "contacts": [
+       {"name": "Person name", "role": "Role/designation", "contact": "Email/phone"}
+     ],
+     "attachments_mentioned": ["List of referenced attachments"],
+     "action_items": ["Any action items or requirements"],
+     "validity": {
+       "start_date": "YYYY-MM-DD or null",
+       "end_date": "YYYY-MM-DD or null",
+       "is_time_sensitive": true/false
+     }
+   }
+
+4. DATA QUALITY ASSESSMENT
+   {
+     "text_clarity": 0-100,
+     "completeness": 0-100,
+     "structure_quality": 0-100,
+     "confidence_overall": 0-100
+   }
+
+5. VALIDATION
+   Check for:
+   - Missing critical information
+   - Inconsistencies
+   - Unclear sections
+   - OCR errors
+   - Format issues
+
+═══════════════════════════════════════════════════════════
+RESPONSE FORMAT (JSON ONLY)
+═══════════════════════════════════════════════════════════
+
+{
+  "document_type": "one of the enum values",
+  "document_category": "specific category description",
+  "confidence_score": 0-100,
+  "extracted_data": {
+    // All extracted structured data as defined above
+  },
+  "data_quality": {
+    "text_clarity": 0-100,
+    "completeness": 0-100,
+    "structure_quality": 0-100,
+    "confidence_overall": 0-100
+  },
+  "validation_errors": [
+    "List of validation issues found"
+  ],
+  "key_findings": [
+    "Important points discovered"
+  ]
+}
+
+IMPORTANT:
+- Return ONLY valid JSON
+- Use null for missing fields
+- Convert dates to YYYY-MM-DD format
+- Be precise with document_type enum
+- Provide detailed extracted_data
+- Assess quality honestly
+
+Begin analysis now:`;
+
+      const response = await this.callBedrock(prompt, systemPrompt);
+      const jsonMatch = response.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) {
+        console.error('❌ Failed to parse AI response');
+
+        // Fallback analysis
+        return {
+          success: true,
+          documentData: {
+            user_id: userId,
+            filename: filename,
+            original_filename: filename,
+            file_size: Buffer.byteLength(extractedText),
+            mime_type: mimeType,
+            upload_source: 'manual',
+            parsing_status: 'completed',
+            extracted_text: extractedText,
+            document_type: 'general',
+            document_category: 'Unclassified Document',
+            confidence_score: 30,
+            extracted_data: {
+              summary: 'AI parsing failed, document saved without analysis',
+              text_length: extractedText.length
+            },
+            page_count: metadata?.page_count,
+            is_password_protected: false,
+            processing_method: 'hybrid',
+            ai_model_used: 'document_analysis_fallback',
+            data_quality_score: 30
+          }
+        };
+      }
+
+      const aiResult = JSON.parse(jsonMatch[0]);
+
+      console.log(`✅ Document classified as: ${aiResult.document_type}`);
+      console.log(`   Category: ${aiResult.document_category}`);
+      console.log(`   Confidence: ${aiResult.confidence_score}%`);
+
+      // Calculate overall data quality score
+      const qualityScore = aiResult.data_quality?.confidence_overall ||
+        Math.round(
+          (
+            (aiResult.data_quality?.text_clarity || 50) +
+            (aiResult.data_quality?.completeness || 50) +
+            (aiResult.data_quality?.structure_quality || 50)
+          ) / 3
+        );
+
+      return {
+        success: true,
+        documentData: {
+          user_id: userId,
+          filename: filename,
+          original_filename: filename,
+          file_size: Buffer.byteLength(extractedText),
+          mime_type: mimeType,
+          upload_source: 'manual',
+          parsing_status: 'completed',
+          parsing_error: aiResult.validation_errors?.length > 0
+            ? aiResult.validation_errors.join('; ')
+            : undefined,
+          extracted_text: extractedText,
+          document_type: aiResult.document_type || 'general',
+          document_category: aiResult.document_category || 'General Document',
+          confidence_score: aiResult.confidence_score || 50,
+          extracted_data: {
+            ...aiResult.extracted_data,
+            key_findings: aiResult.key_findings || [],
+            ai_analysis_timestamp: new Date().toISOString(),
+            extraction_method: metadata?.extraction_method || 'python_extractor'
+          },
+          page_count: metadata?.page_count,
+          is_password_protected: false,
+          processing_method: 'hybrid',
+          ai_model_used: 'document_analysis',
+          data_quality_score: qualityScore,
+          validation_errors: aiResult.validation_errors?.length > 0
+            ? { errors: aiResult.validation_errors }
+            : undefined
+        }
+      };
+
+    } catch (error) {
+      console.error('❌ Error in document content analysis:', error);
+
+      // Return fallback data on error
+      return {
+        success: false,
+        documentData: {
+          user_id: userId,
+          filename: filename,
+          original_filename: filename,
+          file_size: Buffer.byteLength(extractedText),
+          mime_type: mimeType,
+          upload_source: 'manual',
+          parsing_status: 'failed',
+          parsing_error: (error as Error).message,
+          extracted_text: extractedText,
+          document_type: 'general',
+          document_category: 'Error During Classification',
+          confidence_score: 0,
+          extracted_data: {
+            error: (error as Error).message,
+            timestamp: new Date().toISOString()
+          },
+          page_count: metadata?.page_count,
+          is_password_protected: false,
+          processing_method: 'hybrid',
+          ai_model_used: 'document_analysis_error',
+          data_quality_score: 0,
+          validation_errors: { errors: [(error as Error).message] }
+        }
+      };
+    }
+  }
+
 }

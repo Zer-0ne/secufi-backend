@@ -9,10 +9,10 @@
     // Environment Settings
     // See also https://aka.ms/tsconfig/module
     "module": "es6",
-    "target": "esnext",
+    "target": "esnext", // or node
     "moduleResolution": "node",
 
-    "types": [],
+    // "types": ["node"],
     // For nodejs:
     "lib": ["esnext"],
     // "types": ["node"],

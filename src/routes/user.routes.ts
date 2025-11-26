@@ -216,7 +216,7 @@ userRouter.put('/kyc', authenticateJWT, async (req: AuthenticatedRequest, res: R
 
     }
     const { id: userId } = user as User;
-    const { phone, address, date_of_birth, pan_number, name } = req.body;
+    const { phone, address, date_of_birth, pan_number, name, pran_number, uan_number } = req.body;
     const { wants_to_update_details } = req.query;
     if (!phone || !date_of_birth || !pan_number) {
       return res.status(400).json({ success: false, message: 'phone, pan number, address and date_of_birth are required' });
@@ -251,6 +251,8 @@ userRouter.put('/kyc', authenticateJWT, async (req: AuthenticatedRequest, res: R
       name,
       date_of_birth: new Date(senetize_dob || date_of_birth),
       is_verified: true,
+      pran_number,
+      uan_number,
       pan_number,
     } as any);
     if (!updatedUser) {

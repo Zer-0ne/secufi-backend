@@ -508,6 +508,597 @@ export interface ActivityLogResponse {
 }
 
 // ============================================================================
+// Asset Document Metadata Types (AI Service Responses)
+// ============================================================================
+
+/**
+ * Data Quality Assessment from AI
+ * 
+ * @interface DataQualityAssessment
+ * @description Measures the quality of extracted data from documents.
+ * Used by AI to rate the clarity and completeness of extraction.
+ * 
+ * @property {number} textClarity - Text clarity score (0-100)
+ * @property {number} completeness - Data completeness score (0-100)
+ * @property {number} structureQuality - Document structure quality (0-100)
+ * @property {number} overallConfidence - Overall confidence score (0-100)
+ */
+export interface DataQualityAssessment {
+  textClarity: number;
+  completeness: number;
+  structureQuality: number;
+  overallConfidence: number;
+}
+
+/**
+ * Parties and Entities in Financial Document
+ * 
+ * @interface DocumentParties
+ * @description Information about parties involved in financial document.
+ * 
+ * @property {string} [pan] - PAN number
+ * @property {string} [bankName] - Bank name
+ * @property {string} [customerName] - Customer name
+ * @property {string} [mobileNumber] - Mobile number
+ * @property {string} [email] - Email address
+ * @property {string} [address] - Full address
+ */
+export interface DocumentParties {
+  pan?: string;
+  bankName?: string;
+  customerName?: string;
+  mobileNumber?: string;
+  email?: string;
+  address?: string;
+}
+
+/**
+ * Contact Details from Document
+ * 
+ * @interface ContactDetails
+ * @description Contact information extracted from document.
+ * 
+ * @property {string} [mobileNumber] - Mobile number
+ * @property {string} [email] - Email address
+ * @property {string} [phone] - Phone number
+ * @property {string} [website] - Website URL
+ */
+export interface ContactDetails {
+  mobileNumber?: string;
+  email?: string;
+  phone?: string;
+  website?: string;
+}
+
+/**
+ * Financial Figures from Document
+ * 
+ * @interface FinancialFigures
+ * @description All monetary values extracted from document.
+ * 
+ * @property {number} [totalDue] - Total amount due
+ * @property {number} [creditLimit] - Credit limit
+ * @property {number} [outstandingBalance] - Outstanding balance
+ * @property {number} [minimumPayment] - Minimum payment required
+ * @property {number} [totalCredits] - Total credit amount
+ * @property {number} [totalDebits] - Total debit amount
+ * @property {number} [openingBalance] - Opening balance
+ * @property {number} [closingBalance] - Closing balance
+ * @property {number} [interestCharged] - Interest charged
+ * @property {number} [fees] - Fees and charges
+ */
+export interface FinancialFigures {
+  totalDue?: number;
+  creditLimit?: number;
+  outstandingBalance?: number;
+  minimumPayment?: number;
+  totalCredits?: number;
+  totalDebits?: number;
+  openingBalance?: number;
+  closingBalance?: number;
+  interestCharged?: number;
+  fees?: number;
+}
+
+/**
+ * Identification Numbers from Document
+ * 
+ * @interface IdentificationNumbers
+ * @description All identification numbers extracted from document.
+ * 
+ * @property {string} [pan] - PAN number
+ * @property {string} [gstin] - GST number
+ * @property {string} [accountNumber] - Account number
+ * @property {string} [policyNumber] - Policy number
+ * @property {string} [folioNumber] - Folio number
+ * @property {string} [crnNumber] - CRN number
+ * @property {string} [transactionId] - Transaction ID
+ * @property {string} [invoiceNumber] - Invoice number
+ * @property {string} [receiptNumber] - Receipt number
+ */
+export interface IdentificationNumbers {
+  pan?: string;
+  gstin?: string;
+  accountNumber?: string;
+  policyNumber?: string;
+  folioNumber?: string;
+  crnNumber?: string;
+  transactionId?: string;
+  invoiceNumber?: string;
+  receiptNumber?: string;
+}
+
+/**
+ * Document Dates
+ * 
+ * @interface DocumentDates
+ * @description All dates extracted from document.
+ * 
+ * @property {string} [statementDate] - Statement date
+ * @property {string} [dueDate] - Due date
+ * @property {string} [startDate] - Period start date
+ * @property {string} [endDate] - Period end date
+ * @property {string} [maturityDate] - Maturity date
+ * @property {string} [issueDate] - Issue date
+ * @property {string} [paymentDate] - Payment date
+ */
+export interface DocumentDates {
+  statementDate?: string | null;
+  dueDate?: string | null;
+  startDate?: string | null;
+  endDate?: string | null;
+  maturityDate?: string | null;
+  issueDate?: string | null;
+  paymentDate?: string | null;
+}
+
+/**
+ * Transaction Details from Statement
+ * 
+ * @interface TransactionDetail
+ * @description Individual transaction information.
+ * 
+ * @property {string} date - Transaction date
+ * @property {string} description - Transaction description
+ * @property {number} amount - Transaction amount
+ * @property {string} type - Transaction type (debit/credit)
+ * @property {string} [reference] - Reference number
+ * @property {string} [category] - Transaction category
+ */
+export interface TransactionDetail {
+  date: string;
+  description: string;
+  amount: number;
+  type: 'debit' | 'credit';
+  reference?: string;
+  category?: string;
+}
+
+/**
+ * Document Classification
+ * 
+ * @interface DocumentClassification
+ * @description Classification of the financial document.
+ * 
+ * @property {string} type - Document type (e.g., "Credit Card Statement")
+ * @property {string} purpose - Document purpose
+ * @property {string} category - Document category (e.g., "Banking")
+ */
+export interface DocumentClassification {
+  type: string;
+  purpose: string;
+  category: string;
+}
+
+/**
+ * Additional Metadata for Document
+ * 
+ * @interface AdditionalMetadata
+ * @description Extra metadata extracted from document.
+ * 
+ * @property {string} [currency] - Currency code
+ * @property {string} [accountType] - Account type
+ * @property {string} [productType] - Product type
+ * @property {string} [statementPeriod] - Statement period
+ * @property {number} [pageCount] - Number of pages
+ * @property {boolean} [hasTables] - Whether document has tables
+ */
+export interface AdditionalMetadata {
+  currency?: string;
+  accountType?: string;
+  productType?: string;
+  statementPeriod?: string;
+  pageCount?: number;
+  hasTables?: boolean;
+}
+
+/**
+ * Complete Attachment Analysis Content
+ * 
+ * @interface AttachmentContent
+ * @description Full analysis of attachment/PDF document.
+ * This is the structure returned by analyzePDFDocument.
+ * 
+ * @property {DocumentDates | null} dates - All dates from document
+ * @property {DocumentParties} parties - Parties and entities
+ * @property {string[]} keyFindings - Key findings from document
+ * @property {ContactDetails} [contactDetails] - Contact information
+ * @property {FinancialFigures} [financialFigures] - Financial figures
+ * @property {AdditionalMetadata} [additionalMetadata] - Extra metadata
+ * @property {TransactionDetail[] | null} transactionDetails - Transaction list
+ * @property {DataQualityAssessment} dataQualityAssessment - Quality assessment
+ * @property {IdentificationNumbers} [identificationNumbers] - ID numbers
+ * @property {DocumentClassification} documentClassification - Classification
+ */
+export interface AttachmentContent {
+  dates: DocumentDates | null;
+  parties: DocumentParties;
+  keyFindings: string[];
+  contactDetails?: ContactDetails;
+  financialFigures?: FinancialFigures;
+  additionalMetadata?: AdditionalMetadata;
+  transactionDetails: TransactionDetail[] | null;
+  dataQualityAssessment: DataQualityAssessment;
+  identificationNumbers?: IdentificationNumbers;
+  documentClassification: DocumentClassification;
+}
+
+/**
+ * Attachment Analysis Result
+ * 
+ * @interface AttachmentAnalysis
+ * @description Analysis result for individual attachment.
+ * 
+ * @property {AttachmentContent} content - Extracted content
+ * @property {number} confidence - Confidence score (0-100)
+ * @property {string} transactionType - Type of transaction
+ */
+export interface AttachmentAnalysis {
+  content: AttachmentContent;
+  confidence: number;
+  transactionType: string;
+}
+
+/**
+ * AI Analysis Result (Simplified)
+ * 
+ * @interface AIAnalysis
+ * @description Simplified AI analysis for quick reference.
+ * 
+ * @property {string} date - Transaction date
+ * @property {string} status - Current status
+ * @property {string | null} balance - Balance amount
+ * @property {string} [bankName] - Bank name
+ * @property {string} currency - Currency code
+ * @property {string} merchant - Merchant/Institution name
+ * @property {string} assetType - Asset type
+ * @property {number} confidence - Confidence score
+ * @property {string} description - Description
+ * @property {number | null} total_value - Total value
+ * @property {string | null} assetSubType - Asset sub-type
+ * @property {string | null} accountNumber - Account number
+ * @property {string} assetCategory - Asset category
+ * @property {string} transactionType - Transaction type
+ * @property {FinancialMetadata} financialMetadata - Financial metadata
+ */
+export interface AIAnalysis {
+  date: string;
+  status: string;
+  balance: string | null;
+  bankName?: string;
+  currency: string;
+  merchant: string;
+  assetType: string;
+  confidence: number;
+  description: string;
+  total_value: number | null;
+  assetSubType: string | null;
+  accountNumber: string | null;
+  assetCategory: string;
+  transactionType: string;
+  financialMetadata: FinancialMetadata;
+}
+
+// ============================================================================
+// Asset Document Metadata Types
+// ============================================================================
+
+/**
+ * Financial Metadata for Assets
+ * 
+ * @interface FinancialMetadata
+ * @description Comprehensive financial metadata that can be stored in Asset.document_metadata field.
+ * Contains all financial information extracted by AI from documents.
+ * 
+ * @property {number} [totalValue] - Total value of the asset/investment
+ * @property {number} [currentValue] - Current market value
+ * 
+ * @property {boolean} isRecurring - Whether this is a recurring transaction/payment
+ * @property {'monthly' | 'quarterly' | 'yearly' | 'one-time'} [frequency] - Frequency of recurring payments
+ * @property {string} [dueDate] - Due date for payment (ISO date string)
+ * 
+ * @property {number} [coverageAmount] - Insurance coverage amount
+ * @property {number} [premium] - Insurance premium amount
+ * @property {string} [premiumFrequency] - How often premium is paid
+ * @property {string} [maturityDate] - Insurance maturity date (ISO date string)
+ * @property {number} [sumAssured] - Insurance sum assured
+ * @property {number} [policyTerm] - Insurance policy term in years
+ * @property {string} [beneficiary] - Insurance beneficiary name
+ * 
+ * @property {number} [outstandingBalance] - Outstanding balance for liabilities
+ * @property {number} [minimumPayment] - Minimum payment required
+ * @property {number} [creditLimit] - Credit limit (for credit cards)
+ * @property {number} [interestRate] - Interest rate percentage
+ * @property {number} [emiAmount] - EMI amount
+ * @property {string} [emiDueDate] - EMI due date (ISO date string)
+ * 
+ * @property {number} [purchasePrice] - Original purchase price (for investments)
+ * @property {number} [currentNav] - Current NAV (Net Asset Value) for mutual funds
+ * @property {number} [units] - Number of units held
+ * @property {number} [appreciationRate] - Rate of appreciation
+ * @property {number} [returnsPercentage] - Returns in percentage
+ */
+export interface FinancialMetadata {
+  // General Financial Values
+  totalValue?: number;
+  currentValue?: number;
+
+  // Recurring Payment Info
+  isRecurring: boolean;
+  frequency?: 'monthly' | 'quarterly' | 'yearly' | 'one-time';
+  dueDate?: string;
+
+  // Insurance Specific
+  coverageAmount?: number;
+  premium?: number;
+  premiumFrequency?: string;
+  maturityDate?: string;
+  sumAssured?: number;
+  policyTerm?: number;
+  beneficiary?: string;
+
+  // Liability Specific (Credit Cards, Loans)
+  outstandingBalance?: number;
+  minimumPayment?: number;
+  creditLimit?: number;
+  interestRate?: number;
+  emiAmount?: number;
+  emiDueDate?: string;
+
+  // Investment Specific (Stocks, Mutual Funds)
+  purchasePrice?: number;
+  currentNav?: number;
+  units?: number;
+  appreciationRate?: number;
+  returnsPercentage?: number;
+}
+
+/**
+ * Required User Fields for Asset
+ * 
+ * @interface RequiredUserFields
+ * @description Tracks which user profile fields are required for this asset.
+ * Used to identify missing information that needs to be collected from the user.
+ * 
+ * @property {boolean} [name] - User name required
+ * @property {boolean} [phone] - Phone number required
+ * @property {boolean} [email] - Email address required
+ * @property {boolean} [address] - Address required
+ * @property {boolean} [pan_number] - PAN number required
+ * @property {boolean} [aadhar_number] - Aadhar number required
+ * @property {boolean} [date_of_birth] - Date of birth required
+ * @property {boolean} [crn_number] - CRN number required
+ * @property {boolean} [account_number] - Account number required
+ * @property {boolean} [ifsc_code] - IFSC code required
+ * @property {boolean} [policy_number] - Policy number required
+ * @property {boolean} [folio_number] - Folio number required
+ */
+export interface RequiredUserFields {
+  name?: boolean;
+  phone?: boolean;
+  email?: boolean;
+  address?: boolean;
+  pan_number?: boolean;
+  aadhar_number?: boolean;
+  date_of_birth?: boolean;
+  crn_number?: boolean;
+  account_number?: boolean;
+  ifsc_code?: boolean;
+  policy_number?: boolean;
+  folio_number?: boolean;
+}
+
+/**
+ * Complete Document Metadata stored in Asset.document_metadata field
+ * 
+ * @interface DocumentMetadata
+ * @description Full structure of metadata extracted by AI from financial documents.
+ * This is stored as JSON in the Asset.document_metadata field.
+ * Covers ALL possible fields from AI service responses.
+ * 
+ * @property {string} type - Asset type (credit_card, savings_account, etc.)
+ * @property {string} status - Status (active, inactive, etc.)
+ * @property {string} emailId - Email ID from which this was extracted
+ * @property {string | null} subType - Asset sub-type
+ * @property {string} category - Category (asset, liability, insurance)
+ * @property {string} currency - Currency code
+ * @property {string} merchant - Merchant/Bank name
+ * @property {string[]} keyPoints - Key information points
+ * @property {AIAnalysis} aiAnalysis - AI analysis summary
+ * @property {number} confidence - Confidence score (0-100)
+ * @property {string} description - Description
+ * @property {string} emailSender - Email sender
+ * @property {string} extractedAt - Extraction timestamp (ISO)
+ * @property {string} emailSubject - Email subject
+ * @property {string} transactionDate - Transaction date
+ * @property {FinancialMetadata} financialMetadata - Financial metadata
+ * @property {AttachmentAnalysis} [attachmentAnalysis] - Attachment analysis
+ */
+export interface DocumentMetadata {
+  // Basic Identification
+  type: string; // 'credit_card' | 'savings_account' | etc.
+  status: string; // 'active' | 'inactive' | 'pending' | 'complete'
+  emailId: string;
+  subType: string | null;
+  category: string; // 'asset' | 'liability' | 'insurance'
+  
+  // Financial Details
+  currency: string;
+  merchant: string;
+  keyPoints: string[];
+  
+  // AI Analysis
+  aiAnalysis: AIAnalysis;
+  confidence: number;
+  description: string;
+  
+  // Email Context
+  emailSender: string;
+  extractedAt: string; // ISO timestamp
+  emailSubject: string;
+  transactionDate: string;
+  
+  // Financial Metadata
+  financialMetadata: FinancialMetadata;
+  
+  // Attachment Analysis (if attachment was analyzed)
+  attachmentAnalysis?: AttachmentAnalysis;
+}
+
+/**
+ * Extended Asset type with typed document_metadata
+ * 
+ * @interface AssetWithMetadata
+ * @description Asset model with properly typed document_metadata field.
+ * Use this when working with assets that have financial metadata.
+ * 
+ * @property {DocumentMetadata | any} document_metadata - Typed document metadata (can be flexible structure)
+ */
+export interface AssetWithMetadata {
+  id: string;
+  user_id: string;
+  name: string | null;
+  type: string;
+  sub_type: string | null;
+  
+  // Bank/Financial Account Details
+  account_number: string | null;
+  ifsc_code: string | null;
+  branch_name: string | null;
+  bank_name: string | null;
+  
+  // Financial Values
+  balance: number | null;
+  total_value: number | null;
+  
+  // Status & Tracking
+  status: string | null;
+  last_updated: Date;
+  
+  // Address & Location
+  address: string | null;
+  crn_number: string | null;
+  
+  // Nominee/Beneficiary Details
+  nominee: any;
+  
+  // Insurance Specific Fields
+  policy_number: string | null;
+  fund_name: string | null;
+  folio_number: string | null;
+  
+  // Document/Attachment Fields
+  document_type: string | null;
+  document_metadata: DocumentMetadata | any; // ✅ Typed metadata (flexible for different structures)
+  file_name: string | null;
+  file_size: number | null;
+  mime_type: string | null;
+  file_content: string | null;
+  
+  // References
+  transaction_id: string | null;
+  email_id: string | null;
+  
+  // Issues & Required Fields
+  issues: string[];
+  required_fields: string[];
+  
+  // Timestamps
+  created_at: Date;
+  updated_at: Date;
+}
+
+/**
+ * Legacy Document Metadata Format (EnhancedFinancialData)
+ * 
+ * @interface LegacyDocumentMetadata
+ * @description Older format used by analyzeFinancialEmail function.
+ * Keeping for backward compatibility.
+ * 
+ * @property {'invoice' | 'payment' | 'receipt' | 'statement' | 'bill' | 'tax' | 'credit_card' | 'other'} transactionType
+ * @property {number | null} amount
+ * @property {string} currency
+ * @property {string} merchant
+ * @property {string} balance
+ * @property {string} description
+ * @property {string} date
+ * @property {string | null} accountNumber
+ * @property {number} confidence
+ * @property {'asset' | 'liability' | 'insurance' | 'other'} assetCategory
+ * @property {string} assetType
+ * @property {string | null} assetSubType
+ * @property {'active' | 'inactive' | 'pending' | 'complete' | 'missing'} status
+ * @property {string} [bankName]
+ * @property {string} [ifscCode]
+ * @property {string} [branchName]
+ * @property {string} [policyNumber]
+ * @property {string} [folioNumber]
+ * @property {string} [fundName]
+ * @property {RequiredUserFields} [requiredUserFields]
+ * @property {FinancialMetadata} financialMetadata
+ * @property {string[]} keyPoints
+ */
+export interface LegacyDocumentMetadata {
+  // Basic Transaction Data
+  transactionType: 'invoice' | 'payment' | 'receipt' | 'statement' | 'bill' | 'tax' | 'credit_card' | 'other';
+  amount: number | null;
+  currency: string;
+  merchant: string;
+  balance: string;
+  description: string;
+  date: string;
+  accountNumber: string | null;
+  confidence: number;
+
+  // Asset Classification
+  assetCategory: 'asset' | 'liability' | 'insurance' | 'other';
+  assetType: string;
+  assetSubType: string | null;
+
+  // Status
+  status: 'active' | 'inactive' | 'pending' | 'complete' | 'missing';
+
+  // Bank details
+  bankName?: string;
+  ifscCode?: string;
+  branchName?: string;
+
+  // Insurance/Investment
+  policyNumber?: string;
+  folioNumber?: string;
+  fundName?: string;
+
+  // Required fields
+  requiredUserFields?: RequiredUserFields;
+
+  // Financial metadata
+  financialMetadata: FinancialMetadata;
+
+  // Key points
+  keyPoints: string[];
+}
+
+// ============================================================================
 // API Response Types
 // ============================================================================
 
