@@ -467,7 +467,7 @@ export class FileExtractionService {
                     processing_duration: Date.now() - startTime,
                     ai_model_used: 'document_analysis',
                     file_url: storageResult.url,
-                    // storage_path: storageResult.url || null
+                    storage_path: storageResult.s3Key
                 };
 
                 await prisma.document.create({

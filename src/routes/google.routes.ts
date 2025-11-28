@@ -1,14 +1,14 @@
 import { Router, Request, Response } from 'express';
-import { GoogleService } from '@services/google.service';
+import { GoogleService } from '../services/google.service';
 import { PrismaClient } from '@prisma/client';
-import { EncryptionService } from '@services/encryption.service';
+import { EncryptionService } from '../services/encryption.service';
 import {
   GoogleAuthResponse,
   ListEmailsResponse,
   GetEmailResponse,
   EmailMessage,
 } from '@/types/google';
-import { AuthenticatedRequest, authenticateJWT } from '@/middlewares/auth.middleware';
+import { AuthenticatedRequest, authenticateJWT } from '../middlewares/auth.middleware';
 import JWTService from '@/services/jwt.service';
 import { getExpiryDate, isExpired } from '@/config/utils';
 
@@ -135,48 +135,68 @@ googleRouter.get('/auth-url/:userId', async (req: Request, res: Response) => {
  *   "refreshToken": "1//0gabcdef..."
  * }
  */
-googleRouter.post('/set-token', authenticateJWT, async (req: AuthenticatedRequest, res: Response) => {
+googleRouter.post('/set-token', authenticateJWT, async (req: AuthenticatedRequest, res: Response):Promise<Response> => {
   try {
     const { accessToken, refreshToken } = req.body;
     const authHeader = req.headers.authorization;
 
     if (!accessToken) {
-      res.status(400).json({
+      return res.status(400).json({
         success: false,
         message: 'Access token is required',
         error: 'Missing accessToken in request body',
       });
     }
+
+    // Extract and verify token properly
     const token = JWTService.extractFromHeader(authHeader);
-    const userId = (JWTService.decode(token!)!).userId;
-    console.log(userId)
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Authorization token required',
+        error: 'Missing authorization header',
+      });
+    }
+
+    // Verify token is authorized
+    let userId: string;
+    try {
+      const payload = JWTService.verifyAccessToken(token);
+      userId = payload.userId;
+    } catch (error) {
+      return res.status(401).json({
+        success: false,
+        message: 'Unauthorized token',
+        error: 'Token verification failed',
+      });
+    }
 
     await googleService.setUserId(userId);
     const isExist = await googleService.loadCredentialsFromDatabase(userId);
 
     // console.log(isExpired(googleService.getCredentials()!.accessTokenExpiresAt!))
-    if (isExist && !isExpired(googleService.getCredentials()!.accessTokenExpiresAt!)) {
-      res.status(200).json({
-        success: true,
-        message: 'Tokens already exist for this user',
-        error: 'Tokens already exist',
-      });
-      return;
-    }
+    // if (isExist && !isExpired(googleService.getCredentials()!.accessTokenExpiresAt!)) {
+    //   res.status(200).json({
+    //     success: true,
+    //     message: 'Tokens already exist for this user',
+    //     error: 'Tokens already exist',
+    //   });
+    //   return;
+    // }
     googleService.saveCredentialsToDatabase(userId, {
       accessToken,
       refreshToken,
-      accessTokenExpiresAt: getExpiryDate(1),
-      refreshTokenExpiresAt: getExpiryDate(1),
+      accessTokenExpiresAt: getExpiryDate('1h'),
+      refreshTokenExpiresAt: getExpiryDate('1h'),
     })
 
-    res.json({
+    return res.json({
       success: true,
       message: 'Tokens saved successfully',
     });
   } catch (error) {
     console.error('Error saving tokens:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'Failed to save tokens',
       error: error instanceof Error ? error.message : 'Unknown error',

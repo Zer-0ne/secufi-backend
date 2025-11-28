@@ -35,18 +35,42 @@
  *   }
  * });
  */
-export const getExpiryDate = (days: number): number => {
-  // Create a new Date object representing the current date and time
+export const getExpiryDate = (duration: string): number => {
   const date = new Date();
-  
-  // Add the specified number of days to the current date
-  // getDate() returns current day of month, setDate() sets new day
-  date.setDate(date.getDate() + days);
-  
-  // Convert the date to Unix timestamp (milliseconds since Jan 1, 1970)
-  // and return as a number for easy storage and comparison
+
+  // Extract numeric value + unit (e.g., 1 + "h")
+  const value = parseInt(duration);
+  const unit = duration.replace(/[0-9]/g, "").toLowerCase(); // remove digits
+
+  switch (unit) {
+    case "s": // seconds
+      date.setSeconds(date.getSeconds() + value);
+      break;
+    case "m": // minutes
+      date.setMinutes(date.getMinutes() + value);
+      break;
+    case "h": // hours
+      date.setHours(date.getHours() + value);
+      break;
+    case "d": // days
+      date.setDate(date.getDate() + value);
+      break;
+    case "w": // weeks
+      date.setDate(date.getDate() + value * 7);
+      break;
+    case "M": // months
+      date.setMonth(date.getMonth() + value);
+      break;
+    case "y": // years
+      date.setFullYear(date.getFullYear() + value);
+      break;
+    default:
+      throw new Error("Invalid duration format. Example: '1h', '1d', '1M'");
+  }
+
   return date.getTime();
 };
+
 
 /**
  * Checks if a given timestamp has expired (is in the past)

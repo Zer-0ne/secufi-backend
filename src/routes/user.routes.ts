@@ -193,11 +193,23 @@ userRouter.get('/profile', authenticateJWT, async (req: AuthenticatedRequest, re
       res.status(404).json({ success: false, message: 'User not found' });
       return
     }
+    const credentials = await prisma.googleCredential.findUnique({
+      where: {
+        user_id: user.id!
+      }
+    })
+
+    let google_crendential_verified = false;
+
+    if (credentials) {
+      google_crendential_verified = true;
+    }
+
 
     res.json({
       success: true,
       message: 'Profile retrieved successfully',
-      user: userService.formatUserResponse(user),
+      user: { ...userService.formatUserResponse(user), google_crendential_verified },
     });
   } catch (error) {
     console.error('Error fetching profile:', error);

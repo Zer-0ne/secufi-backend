@@ -459,33 +459,38 @@ vaultRoutes.put(
             const assetData = req.body;
             const assetToUpdate = await financialDataService.getAssetById(assetId, req.user?.userId!) as Asset
 
-            // start the email analysis again with required datas
-            let isRequiredDataExist = false;
-            console.log(assetToUpdate.required_fields)
-            for (const field of assetToUpdate?.required_fields || []) {
-                isRequiredDataExist = !!(await checkValueRequired(assetData, field as keyof Asset, req.user?.userId!))
-            }
+            // Skip email processing if skipEmailProcessing flag is set
+            const skipEmailProcessing = req.body.skipEmailProcessing === true;
 
-            if (isRequiredDataExist) {
-                const loaded = await googleService.loadCredentialsFromDatabase(req.user?.userId!);
-                if (!loaded) {
-                    return res.status(401).json({
-                        success: false,
-                        message: 'Not authenticated. Please connect Google account first.',
+            if (!skipEmailProcessing) {
+                // start the email analysis again with required datas
+                let isRequiredDataExist = false;
+                console.log(assetToUpdate.required_fields)
+                for (const field of assetToUpdate?.required_fields || []) {
+                    isRequiredDataExist = !!(await checkValueRequired(assetData, field as keyof Asset, req.user?.userId!))
+                }
+
+                if (isRequiredDataExist) {
+                    const loaded = await googleService.loadCredentialsFromDatabase(req.user?.userId!);
+                    if (!loaded) {
+                        return res.status(401).json({
+                            success: false,
+                            message: 'Not authenticated. Please connect Google account first.',
+                        });
+                    }
+                    const emailData = await googleService.getEmailById(assetToUpdate.email_id!)
+                    const lockedAttachmentsPassword = await aiService.guessPassword(emailData?.subject!, emailData?.body!, req.user?.userId!, assetToUpdate)
+                    console.log('password :: ', lockedAttachmentsPassword)
+                    const emailWithAttachments = await googleService.getEmailWithAttachments(emailData?.id!, attachmentService, lockedAttachmentsPassword ? lockedAttachmentsPassword : undefined);
+                    await financialDataService.updateFinancialEmail(req.user?.userId!, assetId, {
+                        emailId: emailData?.id!,
+                        subject: emailData?.subject!,
+                        from: emailData?.from!,
+                        body: emailData?.body!,
+                        date: emailData?.date!,
+                        attachmentContents: emailWithAttachments.attachments,
                     });
                 }
-                const emailData = await googleService.getEmailById(assetToUpdate.email_id!)
-                const lockedAttachmentsPassword = await aiService.guessPassword(emailData?.subject!, emailData?.body!, req.user?.userId!, assetToUpdate)
-                console.log('password :: ', lockedAttachmentsPassword)
-                const emailWithAttachments = await googleService.getEmailWithAttachments(emailData?.id!, attachmentService, lockedAttachmentsPassword ? lockedAttachmentsPassword : undefined);
-                await financialDataService.updateFinancialEmail(req.user?.userId!, assetId, {
-                    emailId: emailData?.id!,
-                    subject: emailData?.subject!,
-                    from: emailData?.from!,
-                    body: emailData?.body!,
-                    date: emailData?.date!,
-                    attachmentContents: emailWithAttachments.attachments,
-                });
             }
 
             await financialDataService.updateAsset(
@@ -518,6 +523,38 @@ const checkValueRequired = async (assetData: Asset, requiredField: keyof Asset |
     return false;
 }
 
+vaultRoutes.delete('/asset/:assetId', authenticateJWT,
+    async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
+        try {
+            const { assetId } = req.params;
+            if (!assetId) {
+                return res.status(403).json({
+                    message: 'Asset id required!',
+                    error: 'Asset id required!',
+                    status: false
+                })
+            }
+
+            await prisma.asset.delete({
+                where: {
+                    id: assetId
+                }
+            })
+
+            return res.json({
+                message: 'Delete Successfully',
+                status: true,
+            })
+        } catch (error) {
+            console.log('Error in deleting asset :: ', (error as Error).message)
+            return res.status(500).json({
+                message: 'Something went wrong!',
+                error: (error as Error).message
+                , status: false
+            })
+        }
+    }
+)
 
 
 /**

@@ -1,9 +1,26 @@
 import { Router } from 'express';
 import { WillController } from '../controllers/will.controller';
 import { authenticateJWT as authMiddleware } from '../middlewares/auth.middleware';
+import multer from 'multer';
 
 const router = Router();
 const willController = new WillController();
+
+// Configure multer for video uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 100 * 1024 * 1024, // 100MB limit for videos
+  },
+    fileFilter: (req, file, cb) => {
+      // Allow video files only
+      if (file.mimetype.startsWith('video/')) {
+        cb(null, true);
+      } else {
+        cb(null, false); // Reject file without error
+      }
+    }
+});
 
 //  Will Builder Routes
 router.get('/', authMiddleware, willController.getWill);
@@ -24,9 +41,9 @@ router.delete('/beneficiaries/:beneficiaryId', authMiddleware, willController.de
 
 //  Video Witness Routes
 router.get('/video-witness', authMiddleware, willController.getVideoWitnessStatus);
-router.post('/video-witness/testator', authMiddleware, willController.uploadTestatorVideo);
-router.post('/video-witness/witness1', authMiddleware, willController.uploadWitness1Video);
-router.post('/video-witness/witness2', authMiddleware, willController.uploadWitness2Video);
+router.post('/video-witness/testator', authMiddleware, upload.single('video'), willController.uploadTestatorVideo);
+router.post('/video-witness/witness1', authMiddleware, upload.single('video'), willController.uploadWitness1Video);
+router.post('/video-witness/witness2', authMiddleware, upload.single('video'), willController.uploadWitness2Video);
 
 //  Will Preview and Download
 router.get('/preview', authMiddleware, willController.previewWill);

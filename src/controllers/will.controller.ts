@@ -1,8 +1,14 @@
 import { Response } from 'express';
 import { PrismaClient, WillSectionType } from '@prisma/client';
-import { AuthenticatedRequest } from '@/middlewares/auth.middleware';
+import { AuthenticatedRequest } from '../middlewares/auth.middleware';
+import { S3StorageService } from '../services/s3-storage.service';
+import { VideoCompressionService } from '../services/video-compression.service';
+import { AIService } from '../services/ai.service';
 
 const prisma = new PrismaClient();
+const s3Service = new S3StorageService();
+const videoCompressionService = new VideoCompressionService();
+const aiService = new AIService();
 
 export class WillController {
   // Get user's will
@@ -20,8 +26,12 @@ export class WillController {
       if (!will) {
         return res.status(404).json({ message: 'Will not found' });
       }
-
-      return res.json(will);
+      return res.json({
+        ...will,
+        testator_video_url: (will.testator_video_url) ? await s3Service.getFileUrl(will.testator_video_url!) : null,
+        witness1_video_url: (will.witness1_video_url) ? await s3Service.getFileUrl(will.witness1_video_url!) : null,
+        witness2_video_url: (will.witness2_video_url) ? await s3Service.getFileUrl(will.witness2_video_url!) : null,
+      });
     } catch (error) {
       console.error('Error fetching will:', error);
       return res.status(500).json({ message: 'Internal server error' });
@@ -123,26 +133,55 @@ export class WillController {
         },
       });
 
-      res.json(will);
+      return res.json(will);
     } catch (error) {
       console.error('Error updating will:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ message: 'Internal server error' });
     }
   }
 
   // Delete will
-  async deleteWill(req: AuthenticatedRequest, res: Response) {
+  async deleteWill(req: AuthenticatedRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user?.userId!;
 
+      // First get the will to retrieve video URLs
+      const will = await prisma.will.findUnique({
+        where: { user_id: userId },
+      });
+
+      if (!will) {
+        return res.status(404).json({ message: 'Will not found' });
+      }
+
+      // Delete videos from S3 bucket
+      const videoUrls = [
+        will.testator_video_url,
+        will.witness1_video_url,
+        will.witness2_video_url
+      ];
+
+      for (const videoUrl of videoUrls) {
+        if (videoUrl) {
+          try {
+            await s3Service.deleteFile(videoUrl);
+            console.log(`✅ Deleted video from S3: ${videoUrl}`);
+          } catch (error) {
+            console.error(`❌ Failed to delete video from S3: ${videoUrl}`, error);
+            // Continue with deletion even if S3 cleanup fails
+          }
+        }
+      }
+
+      // Delete the will record
       await prisma.will.delete({
         where: { user_id: userId },
       });
 
-      res.json({ message: 'Will deleted successfully' });
+      return res.json({ message: 'Will and associated videos deleted successfully' });
     } catch (error) {
       console.error('Error deleting will:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ message: 'Internal server error' });
     }
   }
 
@@ -293,7 +332,7 @@ export class WillController {
   }
 
   // Update beneficiary
-  async updateBeneficiary(req: AuthenticatedRequest, res: Response) {
+  async updateBeneficiary(req: AuthenticatedRequest, res: Response): Promise<Response> {
     try {
       const { beneficiaryId } = req.params;
       const updateData = req.body;
@@ -303,15 +342,15 @@ export class WillController {
         data: updateData,
       });
 
-      res.json(beneficiary);
+      return res.json(beneficiary);
     } catch (error) {
       console.error('Error updating beneficiary:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ message: 'Internal server error' });
     }
   }
 
   // Delete beneficiary
-  async deleteBeneficiary(req: AuthenticatedRequest, res: Response) {
+  async deleteBeneficiary(req: AuthenticatedRequest, res: Response): Promise<Response> {
     try {
       const { beneficiaryId } = req.params;
 
@@ -319,10 +358,10 @@ export class WillController {
         where: { id: beneficiaryId },
       });
 
-      res.json({ message: 'Beneficiary deleted successfully' });
+      return res.json({ message: 'Beneficiary deleted successfully' });
     } catch (error) {
       console.error('Error deleting beneficiary:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ message: 'Internal server error' });
     }
   }
 
@@ -351,72 +390,226 @@ export class WillController {
   }
 
   // Upload testator video
-  async uploadTestatorVideo(req: AuthenticatedRequest, res: Response) {
+  async uploadTestatorVideo(req: AuthenticatedRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user?.userId!;
-      const { videoUrl } = req.body;
+      const file = req.file;
+
+      if (!file) {
+        return res.status(400).json({ message: 'Video file is required' });
+      }
+
+      // Compress and upload video to S3
+      const compressionResult = await videoCompressionService.compressAndUploadVideo(
+        file.buffer,
+        file.originalname,
+        userId,
+        {
+          targetSize: 10, // 10MB target size
+          quality: 70, // 70% quality
+          resolution: '720p' // 720p resolution
+        }
+      );
+
+      if (!compressionResult.success) {
+        console.error('Video compression failed:', compressionResult.error);
+        // Fallback to original upload without compression
+        const uploadResult = await s3Service.uploadFile({
+          buffer: file.buffer,
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          userId
+        });
+
+        const videoUrl = await s3Service.generatePresignedUrl(uploadResult.key);
+
+        const will = await prisma.will.update({
+          where: { user_id: userId },
+          data: {
+            testator_video_url: uploadResult.key,
+            video_witness_status: 'complete',
+          },
+        });
+
+        return res.json({
+          ...will,
+          videoUrl,
+          compressionApplied: false
+        });
+      }
+
+      // Use compressed video
+      const videoUrl = compressionResult.url!;
 
       const will = await prisma.will.update({
         where: { user_id: userId },
         data: {
-          testator_video_url: videoUrl,
+          testator_video_url: compressionResult.key!, // Store S3 key
           video_witness_status: 'complete',
         },
       });
 
-      res.json(will);
+      return res.json({
+        ...will,
+        videoUrl, // Return pre-signed URL for immediate access
+        compressionApplied: true
+      });
     } catch (error) {
       console.error('Error uploading testator video:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ message: 'Internal server error' });
     }
   }
 
   // Upload witness 1 video
-  async uploadWitness1Video(req: AuthenticatedRequest, res: Response) {
+  async uploadWitness1Video(req: AuthenticatedRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user?.userId!;
-      const { videoUrl, witnessName, witnessEmail } = req.body;
+      const file = req.file;
+      const { witnessName, witnessEmail } = req.body;
+
+      if (!file) {
+        return res.status(400).json({ message: 'Video file is required' });
+      }
+
+      // Compress and upload video to S3
+      const compressionResult = await videoCompressionService.compressAndUploadVideo(
+        file.buffer,
+        file.originalname,
+        userId,
+        {
+          targetSize: 10, // 10MB target size
+          quality: 70, // 70% quality
+          resolution: '720p' // 720p resolution
+        }
+      );
+
+      if (!compressionResult.success) {
+        console.error('Video compression failed:', compressionResult.error);
+        // Fallback to original upload without compression
+        const uploadResult = await s3Service.uploadFile({
+          buffer: file.buffer,
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          userId
+        });
+
+        const videoUrl = await s3Service.generatePresignedUrl(uploadResult.key);
+
+        const will = await prisma.will.update({
+          where: { user_id: userId },
+          data: {
+            witness1_video_url: uploadResult.key,
+            witness1_name: witnessName,
+            witness1_email: witnessEmail,
+          },
+        });
+
+        return res.json({
+          ...will,
+          videoUrl,
+          compressionApplied: false
+        });
+      }
+
+      // Use compressed video
+      const videoUrl = compressionResult.url!;
 
       const will = await prisma.will.update({
         where: { user_id: userId },
         data: {
-          witness1_video_url: videoUrl,
+          witness1_video_url: compressionResult.key!, // Store S3 key
           witness1_name: witnessName,
           witness1_email: witnessEmail,
         },
       });
 
-      res.json(will);
+      return res.json({
+        ...will,
+        videoUrl, // Return pre-signed URL for immediate access
+        compressionApplied: true
+      });
     } catch (error) {
       console.error('Error uploading witness 1 video:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ message: 'Internal server error' });
     }
   }
 
   // Upload witness 2 video
-  async uploadWitness2Video(req: AuthenticatedRequest, res: Response) {
+  async uploadWitness2Video(req: AuthenticatedRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user?.userId!;
-      const { videoUrl, witnessName, witnessEmail } = req.body;
+      const file = req.file;
+      const { witnessName, witnessEmail } = req.body;
+
+      if (!file) {
+        return res.status(400).json({ message: 'Video file is required' });
+      }
+
+      // Compress and upload video to S3
+      const compressionResult = await videoCompressionService.compressAndUploadVideo(
+        file.buffer,
+        file.originalname,
+        userId,
+        {
+          targetSize: 10, // 10MB target size
+          quality: 70, // 70% quality
+          resolution: '720p' // 720p resolution
+        }
+      );
+
+      if (!compressionResult.success) {
+        console.error('Video compression failed:', compressionResult.error);
+        // Fallback to original upload without compression
+        const uploadResult = await s3Service.uploadFile({
+          buffer: file.buffer,
+          filename: file.originalname,
+          mimeType: file.mimetype,
+          userId
+        });
+
+        const videoUrl = await s3Service.generatePresignedUrl(uploadResult.key);
+
+        const will = await prisma.will.update({
+          where: { user_id: userId },
+          data: {
+            witness2_video_url: uploadResult.key,
+            witness2_name: witnessName,
+            witness2_email: witnessEmail,
+          },
+        });
+
+        return res.json({
+          ...will,
+          videoUrl,
+          compressionApplied: false
+        });
+      }
+
+      // Use compressed video
+      const videoUrl = compressionResult.url!;
 
       const will = await prisma.will.update({
         where: { user_id: userId },
         data: {
-          witness2_video_url: videoUrl,
+          witness2_video_url: compressionResult.key!, // Store S3 key
           witness2_name: witnessName,
           witness2_email: witnessEmail,
         },
       });
 
-      res.json(will);
+      return res.json({
+        ...will,
+        videoUrl, // Return pre-signed URL for immediate access
+        compressionApplied: true
+      });
     } catch (error) {
       console.error('Error uploading witness 2 video:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ message: 'Internal server error' });
     }
   }
 
   // Preview will
-  async previewWill(req: AuthenticatedRequest, res: Response) {
+  async previewWill(req: AuthenticatedRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user?.userId!;
 
@@ -432,7 +625,46 @@ export class WillController {
         return res.status(404).json({ message: 'Will not found' });
       }
 
-      // Generate preview data (simplified for now)
+      // Generate structured will data for Bedrock
+      const willData = {
+        title: will.title,
+        testator_name: will.testator_name,
+        testator_address: will.testator_address,
+        testator_date_of_birth: will.testator_date_of_birth,
+        testator_nationality: will.testator_nationality,
+        executor_name: will.executor_name,
+        executor_address: will.executor_address,
+        executor_phone: will.executor_phone,
+        executor_email: will.executor_email,
+        guardian_name: will.guardian_name,
+        guardian_address: will.guardian_address,
+        guardian_phone: will.guardian_phone,
+        guardian_email: will.guardian_email,
+        beneficiaries: will.beneficiaries!.map(beneficiary => ({
+          name: beneficiary.name,
+          relationship: beneficiary.relationship,
+          address: beneficiary.address,
+          phone: beneficiary.phone,
+          email: beneficiary.email,
+          percentage: beneficiary.percentage,
+          specific_assets: beneficiary.specific_assets
+        })),
+        sections: will.will_sections!.map(section => ({
+          title: section.title,
+          description: section.description,
+          section_type: section.section_type,
+          status: section.status,
+          content: section.content
+        })),
+        asset_bequests: will.asset_bequests,
+        digital_assets: will.digital_assets,
+        status: will.status,
+        created_at: will.created_at,
+        updated_at: will.updated_at
+      };
+
+      // For now, return structured data without Bedrock formatting
+      // Bedrock integration will be added when the AI service provides public methods
       const previewData = {
         title: will.title,
         testator_name: will.testator_name,
@@ -441,6 +673,11 @@ export class WillController {
         beneficiaries: will.beneficiaries!,
         sections: will.will_sections!,
         status: will.status,
+        // Enhanced data structure for future Bedrock integration
+        structured_data: willData,
+        document_type: 'will',
+        generated_at: new Date().toISOString(),
+        formatting_status: 'structured_data_ready' // Will be 'formatted' when Bedrock is integrated
       };
 
       return res.json(previewData);
@@ -576,10 +813,10 @@ export class WillController {
         },
       });
 
-      res.json(will);
+      return res.json(will);
     } catch (error) {
       console.error('Error updating legal info:', error);
-      res.status(500).json({ message: 'Internal server error' });
+      return res.status(500).json({ message: 'Internal server error' });
     }
   }
 }

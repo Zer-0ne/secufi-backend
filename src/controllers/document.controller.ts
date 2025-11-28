@@ -3,6 +3,7 @@ import { prisma } from '@/config/database';
 import { FileExtractionService } from '@/services/file-extraction.service';
 import { AIService } from '@/services/ai.service';
 import { AuthenticatedRequest } from '@/middlewares/auth.middleware';
+import { S3StorageService } from '@/services/s3-storage.service';
 
 declare global {
   interface BigInt {
@@ -22,9 +23,9 @@ export const serializeBigInt = (data: any): any => {
     )
   );
 };
+const s3StorageService = new S3StorageService()
 
 export class DocumentController {
-
 
   static getUserDocuments = async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
     try {
@@ -40,8 +41,8 @@ export class DocumentController {
           file_size: true,
           mime_type: true,
           document_type: true,
-          file_url:true,
-          storage_path:true,
+          file_url: true,
+          storage_path: true,
           document_category: true,
           confidence_score: true,
           parsing_status: true,
@@ -49,10 +50,17 @@ export class DocumentController {
           updated_at: true
         }
       });
-
+      const dataD = await Promise.all(
+        documents.map(async (document) => ({
+          ...document,
+          file_url: document.storage_path
+            ? await s3StorageService.getFileUrl(document.storage_path)
+            : null
+        }))
+      );
       return res.json({
         success: true,
-        data: serializeBigInt(documents)
+        data: serializeBigInt(dataD)
       });
 
     } catch (error) {
@@ -136,6 +144,8 @@ export class DocumentController {
           error: 'Document not found'
         });
       }
+      // delete from the s3 bucket first
+      await s3StorageService.deleteFile(document.storage_path!)
 
       await prisma.document.delete({
         where: { id: documentId }

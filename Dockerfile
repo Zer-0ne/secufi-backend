@@ -1,5 +1,5 @@
 # Production Dockerfile - DEBIAN-BASED
-FROM node:22-slim
+FROM node:22-slim as production
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \

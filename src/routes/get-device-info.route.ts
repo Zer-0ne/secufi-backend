@@ -212,7 +212,7 @@ deviceInfoRouter.get('/', async (req, res) => {
   })}`);
 
   res.json({
-    message: 'Welcome to the MLM System API',
+    message: 'Welcome to the Secufi Wallet',
     status: 'running',
     ip: {
       original: clientIp,

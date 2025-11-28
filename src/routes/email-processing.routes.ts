@@ -43,6 +43,7 @@ router.post('/analyze', authenticateJWT, async (req: AuthenticatedRequest, res: 
         // const { userId } = req.params;
         const userId = req.user?.userId
         const { limit } = req.body;
+        const { want_process = false } = req.query
 
         if (!userId) {
             res.status(400).json({
@@ -68,7 +69,7 @@ router.post('/analyze', authenticateJWT, async (req: AuthenticatedRequest, res: 
                 error: 'KYC verification is pending.'
             });
         }
-        
+
         if (!user) {
             res.status(404).json({
                 success: false,
@@ -83,7 +84,7 @@ router.post('/analyze', authenticateJWT, async (req: AuthenticatedRequest, res: 
             : null;
 
         // ✅ 2️⃣ If expiry exists and is in the future → deny processing
-        if (expiry && expiry > now) {
+        if (expiry && expiry > now && !want_process) {
             const remainingDays = Math.ceil(
                 (expiry.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
             );
@@ -109,16 +110,41 @@ router.post('/analyze', authenticateJWT, async (req: AuthenticatedRequest, res: 
             return;
         }
 
-        const emailsResult = await googleService.listEmails(limit || 20);
+        const emailsResult = await googleService.listEmails(limit || 200);
         const emails = emailsResult.emails;
+        const assets = await prisma.asset.findMany({
+            where: {
+                user_id: userId,
+                email_id: {
+                    not: null // Only get assets that have email_id
+                }
+            },
+            select: {
+                email_id: true // Only select email_id field for efficiency
+            }
+        });
+
+        // Create a Set of existing email IDs for fast lookup
+        const existingEmailIds = new Set(
+            assets
+                .map(asset => asset.email_id)
+                .filter((id): id is string => id !== null) // Type guard to remove nulls
+        );
 
         console.log(`📧 Fetched ${emails.length} emails from Gmail`);
+        console.log(`📎 Found ${existingEmailIds.size} emails already in assets`);
+
+        // Classify emails to get financial email IDs
         const financialEmailIds = await aiService.classifyEmailSubjects(emails as EmailMessage[]);
-        console.log(`${financialEmailIds.length} Financial email found`)
+        console.log(`💰 ${financialEmailIds.length} Financial emails found`);
 
-        const filteredEmails = emails.filter(email => financialEmailIds.includes(email.id));
-        // console.log("filteredEmails :: ",filteredEmails,)
-
+        // Filter emails that are:
+        // 1. In the financial email IDs list
+        // 2. NOT already in the assets table
+        const filteredEmails = emails.filter(email =>
+            financialEmailIds.includes(email.id) &&
+            !existingEmailIds.has(email.id)
+        );
 
 
         const results = [];

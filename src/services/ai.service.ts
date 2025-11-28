@@ -221,13 +221,13 @@ export class AIService {
   private async callBedrock(prompt: string, systemPrompt?: string, retries: number = 3): Promise<string> {
     return bedrockQueue.addToQueue<string>(async () => {
       // Check cache first
-      const cacheKey = `${prompt.substring(0, 100)}_${systemPrompt?.substring(0, 50) || 'no_system'}`;
-      const cached = this.apiCache.get(cacheKey);
+      // const cacheKey = `${prompt.substring(0, 100)}_${systemPrompt?.substring(0, 50) || 'no_system'}`;
+      // const cached = this.apiCache.get(cacheKey);
 
-      if (cached && Date.now() - cached.timestamp < this.cacheTtl) {
-        console.log('✓ Using cached Bedrock response');
-        return cached.response;
-      }
+      // if (cached && Date.now() - cached.timestamp < this.cacheTtl) {
+      //   console.log('✓ Using cached Bedrock response');
+      //   return cached.response;
+      // }
 
       let lastError: Error | null = null;
 
@@ -349,13 +349,9 @@ export class AIService {
           const modelResponse = await response.json() as any;
           console.log('✓ Bedrock response received successfully');
 
-          // Cache the successful response
-          this.apiCache.set(cacheKey, {
-            response: modelResponse,
-            timestamp: Date.now()
-          });
-
           // Extract text based on model type
+          let extractedResponse = '';
+          
           if (this.modelId.includes('claude')) {
             // Claude 3.5 Sonnet response structure
             let fullResponse = '';
@@ -369,16 +365,24 @@ export class AIService {
               }
             }
 
-            return fullResponse || modelResponse.content[0]?.text || '';
+            extractedResponse = fullResponse || modelResponse.content[0]?.text || '';
 
           } else if (this.modelId.includes('titan')) {
-            return modelResponse.results[0].outputText;
+            extractedResponse = modelResponse.results[0].outputText;
 
           } else if (this.modelId.includes('llama')) {
-            return modelResponse.generation;
+            extractedResponse = modelResponse.generation;
+          } else {
+            throw new Error('Unsupported model response format');
           }
 
-          throw new Error('Unsupported model response format');
+          // Cache the successful response (store the extracted string)
+          // this.apiCache.set(cacheKey, {
+          //   response: extractedResponse,
+          //   timestamp: Date.now()
+          // });
+
+          return extractedResponse;
 
         } catch (error) {
           lastError = error as Error;

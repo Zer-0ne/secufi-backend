@@ -213,13 +213,22 @@ export class GoogleService {
             }
 
             // Check if credentials have expired
-            if (record.expires_at < new Date()) {
-                console.log(`Credentials expired for user ${userId}, deleting...`);
-                await this.prisma.googleCredential.delete({
-                    where: { id: record.id },
-                });
-                return false;
-            }
+            // if (record.expires_at < new Date()) {
+            //     console.log(`Credentials expired for user ${userId}, deleting...`);
+            //     await this.prisma.googleCredential.delete({
+            //         where: { id: record.id },
+            //     });
+            //     return false;
+            // }
+
+            // Check if refresh token has expired
+            // if (record.refresh_token_expires_at < new Date()) {
+            //     console.log(`Refresh token expired for user ${userId}, deleting...`);
+            //     await this.prisma.googleCredential.delete({
+            //         where: { id: record.id },
+            //     });
+            //     return false;
+            // }
 
             // Decrypt credentials
             const decryptedAccessToken = this.encryptionService.decrypt(
@@ -235,14 +244,14 @@ export class GoogleService {
             this.credentials = {
                 accessToken: decryptedAccessToken,
                 refreshToken: decryptedRefreshToken,
-                accessTokenExpiresAt: record.access_token_expires_at.getTime(),
-                refreshTokenExpiresAt: record.refresh_token_expires_at.getTime(),
+                accessTokenExpiresAt: Date.now() - 1000, // 1 second ago (timestamp)
+                refreshTokenExpiresAt: Date.now() - 1000, // 1 second ago (timestamp)
             };
 
             // Initialize Gmail client
             this.oauth2Client.setCredentials({
-                access_token: this.credentials.accessToken,
-                refresh_token: this.credentials.refreshToken,
+                access_token: this.credentials?.accessToken!,
+                refresh_token: this.credentials?.refreshToken!,
             });
             this.gmail = google.gmail({ version: 'v1', auth: this.oauth2Client });
 
@@ -284,8 +293,20 @@ export class GoogleService {
             await this.saveCredentialsToDatabase(this.userId, updated);
 
             return true;
-        } catch (error) {
+        } catch (error: any) {
             console.error('Error refreshing access token:', error);
+
+            // If refresh token is invalid/expired, delete credentials
+            if (error?.message?.includes('invalid_grant') || error?.message?.includes('invalid refresh_token')) {
+                console.log('Refresh token invalid/expired, deleting credentials...');
+                if (this.userId) {
+                    await this.prisma.googleCredential.deleteMany({
+                        where: { user_id: this.userId },
+                    });
+                }
+                this.credentials = null;
+            }
+
             return false;
         }
     }
@@ -317,13 +338,13 @@ export class GoogleService {
                 format: 'full',
             }) as any;
 
-            
+
             const messages = response.data.messages || [];
             const totalMessages = response.data.resultSizeEstimate || 0;
-            
+
             // console.log("response :: ",messages,totalMessages)
             // Fetch full message details
-            const emailPromises = messages.map((msg:any) =>
+            const emailPromises = messages.map((msg: any) =>
                 this.getEmailById(msg.id || '')
             );
 
@@ -346,124 +367,124 @@ export class GoogleService {
     /**
  * Extract body from Gmail message payload (handles all cases)
  */
-private extractBodyFromPayload(payload?: gmail_v1.Schema$MessagePart): string {
-    try {
-        if (!payload) {
-            return '';
-        }
+    private extractBodyFromPayload(payload?: gmail_v1.Schema$MessagePart): string {
+        try {
+            if (!payload) {
+                return '';
+            }
 
-        // Case 1: Direct body data (simple emails)
-        if (payload.body?.data) {
-            return this.decodeBase64Url(payload.body.data);
-        }
+            // Case 1: Direct body data (simple emails)
+            if (payload.body?.data) {
+                return this.decodeBase64Url(payload.body.data);
+            }
 
-        // Case 2: Multipart message - recursively check parts
-        if (payload.parts && Array.isArray(payload.parts)) {
-            let textPlainBody = '';
-            let textHtmlBody = '';
+            // Case 2: Multipart message - recursively check parts
+            if (payload.parts && Array.isArray(payload.parts)) {
+                let textPlainBody = '';
+                let textHtmlBody = '';
 
-            for (const part of payload.parts) {
-                const mimeType = part.mimeType?.toLowerCase() || '';
+                for (const part of payload.parts) {
+                    const mimeType = part.mimeType?.toLowerCase() || '';
 
-                // Direct text/plain or text/html
-                if (part.body?.data) {
-                    if (mimeType === 'text/plain') {
-                        textPlainBody = this.decodeBase64Url(part.body.data);
-                    } else if (mimeType === 'text/html') {
-                        textHtmlBody = this.decodeBase64Url(part.body.data);
+                    // Direct text/plain or text/html
+                    if (part.body?.data) {
+                        if (mimeType === 'text/plain') {
+                            textPlainBody = this.decodeBase64Url(part.body.data);
+                        } else if (mimeType === 'text/html') {
+                            textHtmlBody = this.decodeBase64Url(part.body.data);
+                        }
                     }
-                }
 
-                // Recursively check nested parts (e.g., multipart/alternative, multipart/mixed)
-                if (part.parts) {
-                    const nestedBody = this.extractBodyFromPayload(part);
-                    if (nestedBody) {
-                        // Prefer text/plain over text/html
-                        if (!textPlainBody) {
-                            textPlainBody = nestedBody;
+                    // Recursively check nested parts (e.g., multipart/alternative, multipart/mixed)
+                    if (part.parts) {
+                        const nestedBody = this.extractBodyFromPayload(part);
+                        if (nestedBody) {
+                            // Prefer text/plain over text/html
+                            if (!textPlainBody) {
+                                textPlainBody = nestedBody;
+                            }
                         }
                     }
                 }
+
+                // Return text/plain if available, otherwise text/html
+                return textPlainBody || textHtmlBody;
             }
 
-            // Return text/plain if available, otherwise text/html
-            return textPlainBody || textHtmlBody;
+            return '';
+        } catch (error) {
+            console.error('Error extracting body:', error);
+            return '';
         }
-
-        return '';
-    } catch (error) {
-        console.error('Error extracting body:', error);
-        return '';
     }
-}
 
-/**
- * Decode Gmail's base64url encoding
- */
-private decodeBase64Url(data: string): string {
-    try {
-        // Gmail uses base64url: replace - with +, _ with /
-        const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
-        
-        // Decode to UTF-8 string
-        return Buffer.from(base64, 'base64').toString('utf-8');
-    } catch (error) {
-        console.error('Error decoding base64url:', error);
-        return '';
-    }
-}
+    /**
+     * Decode Gmail's base64url encoding
+     */
+    private decodeBase64Url(data: string): string {
+        try {
+            // Gmail uses base64url: replace - with +, _ with /
+            const base64 = data.replace(/-/g, '+').replace(/_/g, '/');
 
-/**
- * Get email by ID with full body
- */
-async getEmailById(emailId: string): Promise<EmailMessage | null> {
-    try {
-        if (!this.gmail) {
-            throw new Error('Gmail client not initialized');
+            // Decode to UTF-8 string
+            return Buffer.from(base64, 'base64').toString('utf-8');
+        } catch (error) {
+            console.error('Error decoding base64url:', error);
+            return '';
         }
-
-        if (this.isTokenExpired()) {
-            await this.refreshAccessToken();
-        }
-
-        const response = await this.gmail.users.messages.get({
-            userId: 'me',
-            id: emailId,
-            format: 'full', // Must be 'full' to get body
-        });
-
-        const message = response.data;
-        const headers = message.payload?.headers || [];
-
-        // Extract common headers
-        const getHeader = (name: string) =>
-            headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
-
-        // Extract body
-        const body = this.extractBodyFromPayload(message.payload);
-
-        console.log('Email body length:', body.length);
-        console.log('Email body preview:', body.substring(0, 200));
-
-        const email: EmailMessage = {
-            id: message.id || '',
-            threadId: message.threadId || '',
-            from: getHeader('From'),
-            to: getHeader('To'),
-            subject: getHeader('Subject'),
-            snippet: message.snippet || '',
-            body: body,
-            date: getHeader('Date'),
-            labels: message.labelIds || [],
-            internalDate: message.internalDate || '',
-        };
-
-        return email;
-    } catch (error) {
-        console.error(`Error getting email ${emailId}:`, error);
-        return null;
     }
-}
+
+    /**
+     * Get email by ID with full body
+     */
+    async getEmailById(emailId: string): Promise<EmailMessage | null> {
+        try {
+            if (!this.gmail) {
+                throw new Error('Gmail client not initialized');
+            }
+
+            if (this.isTokenExpired()) {
+                await this.refreshAccessToken();
+            }
+
+            const response = await this.gmail.users.messages.get({
+                userId: 'me',
+                id: emailId,
+                format: 'full', // Must be 'full' to get body
+            });
+
+            const message = response.data;
+            const headers = message.payload?.headers || [];
+
+            // Extract common headers
+            const getHeader = (name: string) =>
+                headers.find((h) => h.name?.toLowerCase() === name.toLowerCase())?.value || '';
+
+            // Extract body
+            const body = this.extractBodyFromPayload(message.payload);
+
+            console.log('Email body length:', body.length);
+            console.log('Email body preview:', body.substring(0, 200));
+
+            const email: EmailMessage = {
+                id: message.id || '',
+                threadId: message.threadId || '',
+                from: getHeader('From'),
+                to: getHeader('To'),
+                subject: getHeader('Subject'),
+                snippet: message.snippet || '',
+                body: body,
+                date: getHeader('Date'),
+                labels: message.labelIds || [],
+                internalDate: message.internalDate || '',
+            };
+
+            return email;
+        } catch (error) {
+            console.error(`Error getting email ${emailId}:`, error);
+            return null;
+        }
+    }
 
 
     /**
@@ -560,7 +581,7 @@ async getEmailById(emailId: string): Promise<EmailMessage | null> {
     async getEmailWithAttachments(
         emailId: string,
         attachmentService: GmailAttachmentService,
-        password?:string
+        password?: string
     ): Promise<{
         email: EmailMessage;
         attachments: Array<{

@@ -26,7 +26,7 @@ interface StoredFileResult {
   fileId?: string;
   previewUrl?: string;
   s3Key?: string;
-  url?: string
+  url?: string | null
 }
 
 export class FileStorageService {

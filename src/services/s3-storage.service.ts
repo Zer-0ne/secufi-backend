@@ -22,7 +22,7 @@ interface S3UploadOptions {
 
 interface S3UploadResult {
   key: string;
-  url: string;
+  url: string | null;
   etag: string | undefined;
 }
 
@@ -68,13 +68,13 @@ export class S3StorageService {
 
       // Use access point alias URL format
       // const url = `https://${this.bucketName}.s3-accesspoint.${process.env.AWS_REGION || 'ap-southeast-2'}.amazonaws.com/${key}`;
-      const url = await this.getFileUrl(key)
+      // const url = await this.getFileUrl(key)
 
       console.log(`✅ File uploaded to S3: ${key}`);
 
       return {
         key,
-        url,
+        url: null,
         etag: result.ETag
       };
 
