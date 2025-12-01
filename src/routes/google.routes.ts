@@ -135,7 +135,7 @@ googleRouter.get('/auth-url/:userId', async (req: Request, res: Response) => {
  *   "refreshToken": "1//0gabcdef..."
  * }
  */
-googleRouter.post('/set-token', authenticateJWT, async (req: AuthenticatedRequest, res: Response):Promise<Response> => {
+googleRouter.post('/set-token', authenticateJWT, async (req: AuthenticatedRequest, res: Response): Promise<Response> => {
   try {
     const { accessToken, refreshToken } = req.body;
     const authHeader = req.headers.authorization;
@@ -201,6 +201,33 @@ googleRouter.post('/set-token', authenticateJWT, async (req: AuthenticatedReques
       message: 'Failed to save tokens',
       error: error instanceof Error ? error.message : 'Unknown error',
     } as GoogleAuthResponse);
+  }
+});
+
+
+// Route handler
+googleRouter.post('/auth/google/callback', authenticateJWT, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { serverAuthCode, } = req.body;
+    const userId = req.user?.userId
+
+    if (!serverAuthCode || !userId) {
+      return res.status(400).json({
+        error: 'serverAuthCode and userId required'
+      });
+    }
+
+    await googleService.handleGoogleAuthCode(serverAuthCode, userId);
+
+    return res.json({
+      success: true,
+      message: 'Google account connected successfully'
+    });
+  } catch (error) {
+    console.error('Google auth error:', error);
+    return res.status(500).json({
+      error: 'Failed to connect Google account'
+    });
   }
 });
 

@@ -1,5 +1,4 @@
 version: "3.8"
-
 services:
   # Production Database
   postgres_prod:
@@ -13,7 +12,7 @@ services:
 
     # NO PORT EXPOSURE - Security best practice
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - postgres_prod_data:/var/lib/postgresql/data
     networks:

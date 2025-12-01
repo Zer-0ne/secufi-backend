@@ -9,12 +9,12 @@
     // Environment Settings
     // See also https://aka.ms/tsconfig/module
     "module": "es6",
-    "target": "esnext", // or node
-    "moduleResolution": "node",
+    "target": "es2015", // or node
+    "moduleResolution": "bundler",
 
     // "types": ["node"],
     // For nodejs:
-    "lib": ["esnext"],
+    // "lib": ["esnext"],
     // "types": ["node"],
     // and npm install -D @types/node
 

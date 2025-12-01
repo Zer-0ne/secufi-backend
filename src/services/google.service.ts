@@ -153,6 +153,8 @@ export class GoogleService {
         credentials: GoogleCredentials
     ): Promise<void> {
         try {
+
+            console.log(credentials)
             const encryptedAccessToken = this.encryptionService.encrypt(
                 credentials.accessToken
             );
@@ -213,13 +215,13 @@ export class GoogleService {
             }
 
             // Check if credentials have expired
-            // if (record.expires_at < new Date()) {
-            //     console.log(`Credentials expired for user ${userId}, deleting...`);
-            //     await this.prisma.googleCredential.delete({
-            //         where: { id: record.id },
-            //     });
-            //     return false;
-            // }
+            if (record.expires_at < new Date()) {
+                console.log(`Credentials expired for user ${userId}, deleting...`);
+                await this.prisma.googleCredential.delete({
+                    where: { id: record.id },
+                });
+                return false;
+            }
 
             // Check if refresh token has expired
             // if (record.refresh_token_expires_at < new Date()) {
@@ -241,12 +243,21 @@ export class GoogleService {
                 record.refresh_token_iv
             ).decrypted;
 
+            // this.credentials = {
+            //     accessToken: decryptedAccessToken,
+            //     refreshToken: decryptedRefreshToken,
+            //     accessTokenExpiresAt: Date.now() - 1000, // 1 second ago (timestamp)
+            //     refreshTokenExpiresAt: Date.now() - 1000, // 1 second ago (timestamp)
+            // };
             this.credentials = {
                 accessToken: decryptedAccessToken,
                 refreshToken: decryptedRefreshToken,
-                accessTokenExpiresAt: Date.now() - 1000, // 1 second ago (timestamp)
-                refreshTokenExpiresAt: Date.now() - 1000, // 1 second ago (timestamp)
+                accessTokenExpiresAt: record.access_token_expires_at.getTime(),
+                refreshTokenExpiresAt: record.refresh_token_expires_at.getTime(),// 1 second ago (timestamp)
             };
+
+            console.log(decryptedRefreshToken)
+
 
             // Initialize Gmail client
             this.oauth2Client.setCredentials({
@@ -268,6 +279,7 @@ export class GoogleService {
      */
     async refreshAccessToken(): Promise<boolean> {
         try {
+            // console.log(this.credentials, this.userId)
             if (!this.credentials?.refreshToken || !this.userId) {
                 console.warn('No refresh token or user ID available');
                 return false;
@@ -310,6 +322,50 @@ export class GoogleService {
             return false;
         }
     }
+
+
+    async handleGoogleAuthCode(authCode: string, userId: string) {
+        try {
+            // Exchange authorization code for tokens
+            const { tokens } = await this.oauth2Client.getToken(authCode);
+
+            if (!tokens.refresh_token) {
+                throw new Error('No refresh token received');
+            }
+
+            // Save to database
+            const encryptedAccessToken = this.encryptionService.encrypt(tokens.access_token!);
+            const encryptedRefreshToken = this.encryptionService.encrypt(tokens.refresh_token);
+
+            await this.prisma.googleCredential.upsert({
+                where: { user_id: userId },
+                create: {
+                    user_id: userId,
+                    encrypted_access_token: encryptedAccessToken.encrypted!,
+                    access_token_iv: encryptedAccessToken.iv!,
+                    encrypted_refresh_token: encryptedRefreshToken.encrypted!,
+                    refresh_token_iv: encryptedRefreshToken.iv!,
+                    access_token_expires_at: new Date(tokens.expiry_date!),
+                    expires_at: new Date(tokens.expiry_date!)!,
+                    refresh_token_expires_at: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000)!, // 1 year
+                },
+                update: {
+                    encrypted_access_token: encryptedAccessToken.encrypted,
+                    access_token_iv: encryptedAccessToken.iv,
+                    encrypted_refresh_token: encryptedRefreshToken.encrypted,
+                    refresh_token_iv: encryptedRefreshToken.iv,
+                    expires_at: new Date(tokens.expiry_date!),
+                },
+            });
+
+            console.log('✓ Tokens saved successfully');
+            return { success: true };
+        } catch (error) {
+            console.error('Error exchanging auth code:', error);
+            throw error;
+        }
+    }
+
 
     /**
      * List all emails

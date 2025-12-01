@@ -842,7 +842,9 @@ Processing status: Ready for OCR analysis`;
           fs.mkdirSync(tmpDir, { recursive: true });
         }
 
-        const tmpFile = path.join(tmpDir, `temp_${Date.now()}_${filename}`);
+        // Sanitize filename to remove invalid characters
+        const sanitizedFilename = filename.replace(/[\\/:*?"<>|]/g, '_');
+        const tmpFile = path.join(tmpDir, `temp_${Date.now()}_${sanitizedFilename}`);
         fs.writeFileSync(tmpFile, buffer);
 
         console.log(`⟳ Calling Python extractor: ${filename}`);
